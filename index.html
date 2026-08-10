@@ -1,0 +1,1256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SAT Practice — module simulator</title>
+<style>
+  :root{
+    --bg:#fff; --fg:#1e1e1e; --muted:#5b6772; --line:#c7ccd1; --line2:#e3e6e9;
+    --blue:#0d5ac1; --blue-dk:#0a459a; --band:#f5f6f7; --warn:#b4231c; --ok:#137a3f;
+    --sel:#0d5ac1; --mark:#c8500a;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  button{font:inherit;color:inherit}
+  .hidden{display:none !important}
+
+  /* ---------- shell ---------- */
+  #app{display:flex;flex-direction:column;height:100vh}
+  header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+    padding:10px 22px 6px;border-bottom:1px dashed var(--line);gap:12px;flex:0 0 auto}
+  .hleft{font-weight:700;font-size:15px}
+  .hleft small{display:block;font-weight:400;color:var(--muted);font-size:13px}
+  .timerwrap{text-align:center;min-width:120px}
+  .timer{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .timer.low{color:var(--warn)}
+  .timerbar{width:56px;height:3px;background:var(--fg);margin:3px auto 0;border-radius:2px}
+  .tbtn{background:none;border:1px solid var(--line);border-radius:14px;padding:1px 12px;
+    font-size:12px;cursor:pointer;color:var(--muted);margin-top:4px}
+  .hright{display:flex;gap:22px;justify-content:flex-end;align-items:center}
+  .tool{background:none;border:none;cursor:pointer;font-size:12px;color:var(--fg);
+    display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 4px;border-radius:6px}
+  .tool:hover{background:var(--band)}
+  .tool span.ic{font-size:18px;line-height:1}
+
+  /* ---------- question area ---------- */
+  main{flex:1 1 auto;overflow:hidden;display:flex}
+  .split{display:flex;width:100%}
+  .pane{overflow-y:auto;padding:26px 34px}
+  .pane.left{width:50%;border-right:1px solid var(--line)}
+  .pane.right{width:50%}
+  .pane.solo{width:100%;max-width:820px;margin:0 auto}
+  .qhead{display:flex;align-items:stretch;gap:0;margin-bottom:18px;background:var(--band);
+    border-radius:3px;overflow:hidden}
+  .qnum{background:var(--fg);color:#fff;font-weight:700;width:34px;display:flex;
+    align-items:center;justify-content:center;font-size:15px}
+  .qhead .acts{display:flex;align-items:center;gap:16px;padding:5px 12px;flex:1}
+  .markbtn{background:none;border:none;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px}
+  .markbtn.on{color:var(--mark);font-weight:600}
+  .abcbtn{margin-left:auto;background:none;border:1px solid var(--line);border-radius:4px;
+    padding:2px 8px;font-size:13px;cursor:pointer;font-weight:600}
+  .abcbtn.on{background:var(--fg);color:#fff;border-color:var(--fg)}
+  .stim,.stem{font-size:17px;line-height:1.62}
+  .stem{margin-bottom:18px}
+  .stim p,.stem p{margin:0 0 14px}
+  .stim table,.stem table{border-collapse:collapse;margin:12px 0;font-size:15px}
+  .stim td,.stim th,.stem td,.stem th{border:1px solid var(--line);padding:5px 10px;text-align:center}
+  .stim img,.stem img,.stim svg,.stem svg{max-width:100%;height:auto;display:block;margin:12px auto}
+  .stim figure,.stem figure{margin:12px 0}
+  math{font-size:1.02em}
+  /* College Board ships the word "blank" as screen-reader text next to the
+     aria-hidden underscores. Hide it visually, keep it for assistive tech. */
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+    overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+  .opts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
+  .opt{display:flex;align-items:flex-start;gap:11px;border:1.5px solid var(--line);
+    border-radius:8px;padding:11px 13px;cursor:pointer;background:#fff;text-align:left;
+    width:100%;position:relative;transition:border-color .1s}
+  .opt:hover{border-color:var(--blue)}
+  .opt .ltr{flex:0 0 auto;width:25px;height:25px;border:1.5px solid var(--muted);border-radius:50%;
+    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600}
+  .opt .body{flex:1;padding-top:1px}
+  .opt .body p{margin:0}
+  .opt.sel{border-color:var(--sel);border-width:2px;padding:10px 12px}
+  .opt.sel .ltr{background:var(--sel);border-color:var(--sel);color:#fff}
+  .opt.struck{opacity:.45}
+  .opt.struck .body{text-decoration:line-through}
+  .opt.correct{border-color:var(--ok);background:#f1faf4}
+  .opt.wrong{border-color:var(--warn);background:#fdf3f2}
+  .undo{position:absolute;right:-46px;top:50%;transform:translateY(-50%);font-size:11px;
+    background:none;border:none;text-decoration:underline;cursor:pointer;color:var(--muted)}
+  .strikecol{position:absolute;right:-34px;top:50%;transform:translateY(-50%);
+    width:24px;height:24px;border:1px solid var(--muted);border-radius:50%;background:#fff;
+    font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    text-decoration:line-through}
+  .opts.abcmode{padding-right:44px}
+
+  .sprwrap{margin-top:4px}
+  .sprwrap input{font-size:20px;padding:9px 12px;border:1.5px solid var(--muted);
+    border-radius:6px;width:230px;font-variant-numeric:tabular-nums}
+  .sprprev{margin-top:8px;font-size:14px;color:var(--muted)}
+
+  /* ---------- footer ---------- */
+  footer{flex:0 0 auto;border-top:1px solid var(--line2);padding:11px 22px;
+    display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:#fff}
+  .who{font-weight:600;font-size:14px}
+  .navbtn{background:var(--blue);color:#fff;border:none;border-radius:18px;
+    padding:9px 22px;font-weight:600;cursor:pointer;font-size:14px}
+  .navbtn:hover{background:var(--blue-dk)}
+  .navbtn.ghost{background:#fff;color:var(--blue);border:1.5px solid var(--blue)}
+  .navbtn:disabled{opacity:.4;cursor:default}
+  .footright{display:flex;gap:10px;justify-content:flex-end}
+  .qpick{background:var(--fg);color:#fff;border:none;border-radius:5px;padding:7px 15px;
+    font-size:14px;font-weight:600;cursor:pointer}
+
+  /* ---------- nav popup ---------- */
+  .navpop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;
+    align-items:center;justify-content:center;z-index:40}
+  .navcard{background:#fff;border-radius:10px;padding:22px 26px;width:min(560px,92vw);
+    box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .navcard h3{margin:0 0 4px;text-align:center;font-size:17px}
+  .legend{display:flex;gap:20px;justify-content:center;font-size:12.5px;color:var(--muted);
+    border-bottom:1px dashed var(--line);padding-bottom:12px;margin-bottom:16px}
+  .legend i{font-style:normal}
+  .grid{display:grid;grid-template-columns:repeat(9,1fr);gap:9px}
+  .gcell{position:relative;aspect-ratio:1;border:1.5px dashed var(--muted);border-radius:4px;
+    background:#fff;cursor:pointer;font-size:14px;font-weight:600}
+  .gcell.done{background:var(--blue);border:1.5px solid var(--blue);color:#fff}
+  .gcell.cur{outline:2px solid var(--fg);outline-offset:2px}
+  .gcell.cur::before{content:"▾";position:absolute;top:-17px;left:50%;transform:translateX(-50%);
+    font-size:13px;color:var(--fg)}
+  .gcell.mk::after{content:"⚑";position:absolute;top:-8px;right:-5px;font-size:12px;color:var(--mark)}
+  .gcell.gok{background:var(--ok);border-color:var(--ok);color:#fff}
+  .gcell.gbad{background:var(--warn);border-color:var(--warn);color:#fff}
+  .navcard .go{display:block;margin:20px auto 0}
+
+  /* ---------- generic screens ---------- */
+  .screen{flex:1;overflow-y:auto;padding:38px 26px 60px}
+  .wrap{max-width:920px;margin:0 auto}
+  h1{font-size:27px;margin:0 0 6px}
+  h2{font-size:20px;margin:30px 0 12px}
+  .sub{color:var(--muted);margin:0 0 26px;font-size:15px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:14px}
+  .card{border:1.5px solid var(--line);border-radius:10px;padding:16px 17px;text-align:left;
+    background:#fff;cursor:pointer;transition:.12s}
+  .card:hover{border-color:var(--blue);box-shadow:0 3px 12px rgba(13,90,193,.13)}
+  .card b{display:block;font-size:16px;margin-bottom:4px}
+  .card span{font-size:13.5px;color:var(--muted);line-height:1.45}
+  .note{background:var(--band);border-left:3px solid var(--line);padding:12px 16px;
+    border-radius:0 6px 6px 0;font-size:14px;color:var(--muted);margin:22px 0}
+  .guard{border:1.5px solid var(--ok);background:#f2faf5;border-radius:10px;
+    padding:13px 16px;margin:0 0 26px}
+  .guard.off{border-color:var(--warn);background:#fdf3f2}
+  .guard label{display:flex;gap:11px;align-items:flex-start;cursor:pointer}
+  .guard input{margin-top:3px;width:17px;height:17px;flex:0 0 auto;accent-color:var(--ok)}
+  .guard.off input{accent-color:var(--warn)}
+  .guard b{font-size:15px}
+  .guard em{display:block;font-style:normal;font-size:13.5px;color:var(--muted);
+    margin-top:3px;line-height:1.5}
+  .guard .danger{margin:10px 0 0 28px;font-size:13.5px;color:var(--warn);font-weight:600}
+  fieldset{border:1.5px solid var(--line);border-radius:10px;padding:14px 17px;margin:0 0 15px}
+  legend{font-weight:700;font-size:14px;padding:0 7px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1.5px solid var(--line);border-radius:16px;padding:5px 13px;font-size:13.5px;
+    cursor:pointer;background:#fff;user-select:none}
+  .chip.on{background:var(--fg);color:#fff;border-color:var(--fg)}
+  .row{display:flex;gap:22px;flex-wrap:wrap;align-items:center;font-size:14px}
+  .row label{display:flex;gap:7px;align-items:center}
+  input[type=number]{width:74px;padding:5px 7px;border:1.5px solid var(--line);border-radius:5px;font:inherit}
+
+  /* ---------- results ---------- */
+  .big{display:flex;gap:34px;flex-wrap:wrap;margin:8px 0 6px}
+  .stat b{display:block;font-size:34px;line-height:1.1}
+  .stat span{font-size:13px;color:var(--muted)}
+  table.brk{width:100%;border-collapse:collapse;font-size:14.5px;margin-top:8px}
+  table.brk th,table.brk td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line2)}
+  table.brk th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  .bar{height:7px;background:var(--line2);border-radius:4px;overflow:hidden;width:130px;display:inline-block;vertical-align:middle}
+  .bar i{display:block;height:100%;background:var(--blue)}
+  .revq{border:1.5px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px}
+  .revq.bad{border-color:#eab8b4}
+  .revq .tag{font-size:12px;color:var(--muted);margin-bottom:9px;display:flex;gap:12px;flex-wrap:wrap}
+  .revq .tag b{color:var(--fg)}
+  .rat{font-size:14.5px;line-height:1.6;border-top:1px dashed var(--line);margin-top:13px;padding-top:11px;color:#333}
+  .rat p{margin:0 0 10px}
+  details summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--blue);outline:none}
+
+  .brk-mid{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    height:100%;text-align:center;gap:6px}
+  .brk-mid .clock{font-size:60px;font-weight:700;font-variant-numeric:tabular-nums}
+  #boot{display:flex;align-items:center;justify-content:center;height:100vh;padding:20px}
+  .bootcard{max-width:460px;width:100%;text-align:center}
+  .bootcard h1{font-size:23px;margin-bottom:10px}
+  #bootmsg{color:var(--muted);font-size:15px;margin:0 0 18px;line-height:1.5}
+  .pbar{height:5px;background:var(--line2);border-radius:3px;overflow:hidden}
+  .pbar i{display:block;height:100%;width:0;background:var(--blue);
+    transition:width .18s ease-out;border-radius:3px}
+  .pbar.idle i{width:35%;animation:sweep 1.1s ease-in-out infinite}
+  @keyframes sweep{0%{margin-left:-35%}100%{margin-left:100%}}
+  #bootextra{margin-top:20px;font-size:14px;color:var(--muted);line-height:1.6}
+  #bootextra button{margin:6px 4px 0}
+  .loadwrap{display:flex;align-items:center;justify-content:center;flex:1;padding:20px}
+
+  @media (max-width:760px){
+    .split{flex-direction:column}
+    .pane.left,.pane.right{width:100%;border-right:none}
+    .pane.left{border-bottom:1px solid var(--line);max-height:44vh}
+    .grid{grid-template-columns:repeat(6,1fr)}
+    header{padding:8px 12px 4px}.hright{gap:12px}
+    .pane{padding:18px 16px}
+    .opts.abcmode{padding-right:38px}
+  }
+</style>
+</head>
+<body>
+<div id="boot">
+  <div class="bootcard">
+    <h1>SAT module simulator</h1>
+    <p id="bootmsg">Loading the question index…</p>
+    <div class="pbar"><i id="bootbar"></i></div>
+    <div id="bootextra"></div>
+  </div>
+</div>
+<div id="app" class="hidden"></div>
+
+<script src="gridins.js"></script>
+<script>
+/* =========================================================================
+   Digital-SAT-style module simulator over the College Board Question Bank.
+   Structure is modelled on Bluebook; the question pool is NOT adaptive, so
+   "module 2" here means a difficulty-weighted draw, not a real adaptive stage.
+   ========================================================================= */
+
+const $ = (s, r = document) => r.querySelector(s);
+const app = $('#app');
+
+/* ---------------------------------------------------------------------------
+   DATA LAYER
+
+   Nothing is bundled with this app. The question index and each question's
+   content are fetched from College Board's public question-bank API, in the
+   visitor's own browser, and cached in IndexedDB. So this page is a client,
+   not a mirror: it never hosts or redistributes their content.
+
+   First visit costs 3 requests (two metadata lists + the active-items lookup).
+   Question bodies are pulled only when a module actually needs them — 27 for a
+   Reading and Writing module, 98 for a whole test — and are then cached
+   permanently, so a returning visitor re-fetches nothing.
+   --------------------------------------------------------------------------- */
+const API = {
+  LIST:   'https://qbank-api.collegeboard.org/msreportingquestionbank-prod/questionbank/digital/get-questions',
+  ITEM:   'https://qbank-api.collegeboard.org/msreportingquestionbank-prod/questionbank/digital/get-question',
+  LOOKUP: 'https://qbank-api.collegeboard.org/msreportingquestionbank-prod/questionbank/lookup',
+};
+const SECREQ = {
+  rw:   { test: 1, domain: 'INI,CAS,EOI,SEC', live: 'readingLiveItems' },
+  math: { test: 2, domain: 'H,P,Q,S',         live: 'mathLiveItems' },
+};
+const INDEX_TTL = 7 * 24 * 3600 * 1000;   // re-check active flags weekly
+
+async function req(url, body, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(url, body ? {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      } : {});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } catch (e) {
+      if (i === tries - 1) throw e;
+      await new Promise(r => setTimeout(r, 400 * (i + 1)));   // back off and retry
+    }
+  }
+}
+
+/** Bounded-concurrency map. Keeps us to a handful of open sockets. */
+async function pooled(items, width, fn, onProgress) {
+  const out = new Array(items.length);
+  let next = 0, done = 0;
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+      if (onProgress) onProgress(++done, items.length);
+    }
+  }));
+  return out;
+}
+
+// ---- IndexedDB -------------------------------------------------------------
+const DB = {
+  _db: null,
+  open() {
+    if (this._db) return Promise.resolve(this._db);
+    return new Promise((res, rej) => {
+      const rq = indexedDB.open('satsim', 1);
+      rq.onupgradeneeded = () => {
+        const db = rq.result;
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+        if (!db.objectStoreNames.contains('body')) db.createObjectStore('body');
+      };
+      rq.onsuccess = () => res(this._db = rq.result);
+      rq.onerror = () => rej(rq.error);
+    });
+  },
+  async _tx(store, mode) { return (await this.open()).transaction(store, mode).objectStore(store); },
+  async get(store, key) {
+    const s = await this._tx(store, 'readonly');
+    return new Promise(res => { const r = s.get(key); r.onsuccess = () => res(r.result); r.onerror = () => res(undefined); });
+  },
+  async put(store, key, val) {
+    const s = await this._tx(store, 'readwrite');
+    return new Promise(res => { s.put(val, key).onsuccess = () => res(); });
+  },
+  /** One transaction for many reads — far faster than awaiting each. */
+  async getMany(store, keys) {
+    if (!keys.length) return {};
+    const s = await this._tx(store, 'readonly'), out = {};
+    return new Promise(res => {
+      let left = keys.length;
+      keys.forEach(k => {
+        const r = s.get(k);
+        r.onsuccess = () => { if (r.result) out[k] = r.result; if (!--left) res(out); };
+        r.onerror = () => { if (!--left) res(out); };
+      });
+    });
+  },
+  async putMany(store, entries) {
+    if (!entries.length) return;
+    const s = await this._tx(store, 'readwrite');
+    return new Promise(res => {
+      let left = entries.length;
+      entries.forEach(([k, v]) => { const r = s.put(v, k); r.onsuccess = r.onerror = () => { if (!--left) res(); }; });
+    });
+  },
+  async count(store) {
+    const s = await this._tx(store, 'readonly');
+    return new Promise(res => { const r = s.count(); r.onsuccess = () => res(r.result); r.onerror = () => res(0); });
+  },
+  async clear(store) {
+    const s = await this._tx(store, 'readwrite');
+    return new Promise(res => { s.clear().onsuccess = () => res(); });
+  },
+};
+
+// ---- the index (metadata for every question) -------------------------------
+let INDEX = { rw: [], math: [] };
+let indexStale = false;          // showing a cached index because the network failed
+
+const GRIDIN = new Set(window.GRIDINS || []);
+
+async function fetchIndex() {
+  const look = await req(API.LOOKUP);
+  const out = {};
+  for (const [sec, p] of Object.entries(SECREQ)) {
+    const live = new Set(look[p.live] || []);
+    const rows = await req(API.LIST, { asmtEventId: 99, test: p.test, domain: p.domain });
+    out[sec] = rows.filter(m => m.external_id).map(m => ({
+      id: m.questionId,
+      ext: m.external_id,
+      dom: m.primary_class_cd,
+      domName: m.primary_class_cd_desc,
+      skill: m.skill_desc,
+      diff: m.difficulty,
+      live: live.has(m.external_id) ? 1 : 0,
+      // metadata has no question type; seed from the shipped grid-in id list and
+      // correct it for real the first time we fetch the body (see hydrate)
+      type: GRIDIN.has(m.questionId) ? 'spr' : 'mcq',
+    }));
+  }
+  return out;
+}
+
+async function loadIndex(onMsg) {
+  const cached = await DB.get('meta', 'index');
+  const fresh = cached && Date.now() - cached.ts < INDEX_TTL;
+  if (fresh) {
+    INDEX = cached.data;
+    return { from: 'cache' };
+  }
+  try {
+    onMsg && onMsg('Fetching the question index from College Board…');
+    INDEX = await fetchIndex();
+    await DB.put('meta', 'index', { ts: Date.now(), data: INDEX });
+    return { from: 'network' };
+  } catch (e) {
+    if (cached) { INDEX = cached.data; indexStale = true; return { from: 'stale', error: e }; }
+    throw e;
+  }
+}
+
+// ---- question bodies -------------------------------------------------------
+const MEM = new Map();           // ext -> body, within this page load
+
+function normalise(d) {
+  const opts = d.answerOptions || [];
+  return {
+    type: d.type || 'mcq',
+    sti: d.stimulus || '',
+    stem: d.stem || '',
+    opts: opts.map(o => o.content || ''),
+    ans: d.correct_answer || [],
+    rat: d.rationale || '',
+  };
+}
+
+/** Attach content to index entries, fetching only what isn't already cached. */
+async function hydrate(entries, onProgress) {
+  const missing = entries.filter(e => !MEM.has(e.ext));
+  if (missing.length) {
+    const stored = await DB.getMany('body', missing.map(e => e.ext));
+    for (const [k, v] of Object.entries(stored)) MEM.set(k, v);
+  }
+  const need = entries.filter(e => !MEM.has(e.ext));
+  let done = entries.length - need.length;
+  onProgress && onProgress(done, entries.length);
+
+  if (need.length) {
+    const got = await pooled(need, 6, async e => {
+      const body = normalise(await req(API.ITEM, { external_id: e.ext }));
+      MEM.set(e.ext, body);
+      return [e.ext, body];
+    }, () => onProgress && onProgress(++done, entries.length));
+    await DB.putMany('body', got);
+  }
+
+  // The body is authoritative about question type. Correct the index where the
+  // seeded guess was wrong so later module builds place grid-ins accurately.
+  let drift = false;
+  for (const e of entries) {
+    const t = MEM.get(e.ext).type;
+    if (t !== e.type) { e.type = t; drift = true; }
+  }
+  if (drift) DB.put('meta', 'index', { ts: Date.now(), data: INDEX });
+
+  return entries.map(e => Object.assign({}, e, MEM.get(e.ext)));
+}
+
+// ---- real test structure ---------------------------------------------------
+const SPEC = {
+  rw:   { name: 'Reading and Writing', qs: 27, mins: 32,
+          doms: { CAS: 7, INI: 6, SEC: 8, EOI: 6 },
+          order: ['CAS', 'INI', 'SEC', 'EOI'] },
+  math: { name: 'Math', qs: 22, mins: 35,
+          doms: { H: 7, P: 7, Q: 4, S: 4 },
+          // ~25% of a real math module is student-produced response, so pin the
+          // count per domain instead of leaving it to the luck of the draw
+          spr:  { H: 2, P: 2, Q: 1, S: 1 },
+          order: ['H', 'P', 'Q', 'S'] },
+};
+const DOMNAME = {
+  CAS: 'Craft and Structure', INI: 'Information and Ideas',
+  SEC: 'Standard English Conventions', EOI: 'Expression of Ideas',
+  H: 'Algebra', P: 'Advanced Math',
+  Q: 'Problem-Solving and Data Analysis', S: 'Geometry and Trigonometry',
+};
+// difficulty weighting per module / adaptive route
+const MIX = {
+  m1:     { E: 0.38, M: 0.40, H: 0.22 },
+  m2hard: { E: 0.06, M: 0.34, H: 0.60 },
+  m2easy: { E: 0.60, M: 0.34, H: 0.06 },
+};
+
+// ---- persistence -----------------------------------------------------------
+const LS = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem('satsim.' + k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('satsim.' + k, JSON.stringify(v)); } catch {} },
+};
+let seen = new Set(LS.get('seen', []));
+const markSeen = qs => { qs.forEach(q => seen.add(q.id)); LS.set('seen', [...seen]); };
+
+// "Exclude Active Questions" — the same flag the official bank UI exposes.
+// Active items are the ones College Board still has in use, so they're the ones
+// that can spoil a practice test you haven't taken yet. Default: excluded.
+let noActive = LS.get('noActive', true);
+const pool = sec => noActive ? INDEX[sec].filter(q => !q.live) : INDEX[sec];
+const poolCount = sec => pool(sec).length;
+
+// ---- question selection ----------------------------------------------------
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const DIFFRANK = { E: 0, M: 1, H: 2 };
+
+/** Pick n from pool, preferring unseen, honouring a difficulty mix. */
+function draw(pool, n, mix) {
+  const byDiff = { E: [], M: [], H: [] };
+  for (const q of pool) byDiff[q.diff].push(q);
+  for (const k in byDiff) {
+    // unseen first, shuffled within each tier
+    const [fresh, old] = [[], []];
+    for (const q of shuffle(byDiff[k])) (seen.has(q.id) ? old : fresh).push(q);
+    byDiff[k] = fresh.concat(old);
+  }
+  const want = {};
+  let assigned = 0;
+  for (const k of ['E', 'M', 'H']) { want[k] = Math.round(n * mix[k]); assigned += want[k]; }
+  want.M += n - assigned;                       // rounding slack lands on medium
+  const out = [];
+  for (const k of ['E', 'M', 'H']) out.push(...byDiff[k].splice(0, Math.max(0, want[k])));
+  // top up from whatever is left if a tier ran dry
+  const rest = [...byDiff.E, ...byDiff.M, ...byDiff.H];
+  while (out.length < n && rest.length) out.push(rest.shift());
+  return out;
+}
+
+/** Build one module: correct domain counts, correct MCQ/grid-in split, correct order. */
+function buildModule(sec, mix) {
+  const spec = SPEC[sec], all = pool(sec), out = [];
+  for (const dom of spec.order) {
+    const dp = all.filter(q => q.dom === dom);
+    let picked;
+    if (spec.spr) {
+      const nSpr = spec.spr[dom];
+      picked = draw(dp.filter(q => q.type === 'spr'), nSpr, mix)
+        .concat(draw(dp.filter(q => q.type === 'mcq'), spec.doms[dom] - nSpr, mix));
+    } else {
+      picked = draw(dp, spec.doms[dom], mix);
+    }
+    if (sec === 'rw') picked.sort((a, b) => DIFFRANK[a.diff] - DIFFRANK[b.diff]); // easy→hard in domain
+    out.push(...picked);
+  }
+  if (sec === 'math') {
+    // math is domain-mixed, roughly ascending difficulty, grid-ins last
+    out.sort((a, b) => (a.type === 'spr') - (b.type === 'spr')
+                    || DIFFRANK[a.diff] - DIFFRANK[b.diff]);
+  }
+  markSeen(out);
+  return out;
+}
+
+function buildCustom(sec, doms, diffs, n) {
+  const p = pool(sec).filter(q => doms.includes(q.dom) && diffs.includes(q.diff));
+  const mix = {};
+  for (const d of ['E', 'M', 'H']) mix[d] = diffs.includes(d) ? 1 / diffs.length : 0;
+  const out = draw(p, Math.min(n, p.length), mix);
+  shuffle(out);
+  markSeen(out);
+  return out;
+}
+
+// ---- answer checking -------------------------------------------------------
+const LETTERS = ['A', 'B', 'C', 'D'];
+
+function numify(s) {
+  s = String(s).trim().replace(/\s+/g, '').replace(/^\+/, '');
+  if (/^-?\d+\/\d+$/.test(s)) { const [a, b] = s.split('/'); return +b ? +a / +b : NaN; }
+  if (/^-?(\d+\.?\d*|\.\d+)%$/.test(s)) return parseFloat(s) / 100;
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(s) ? parseFloat(s) : NaN;
+}
+function isCorrect(q, resp) {
+  if (resp == null || resp === '') return false;
+  if (q.type === 'spr') {
+    const accepted = q.ans.map(String);
+    const clean = String(resp).trim().replace(/\s+/g, '');
+    if (accepted.some(a => a.trim().replace(/\s+/g, '') === clean)) return true;
+    const v = numify(clean);
+    if (isNaN(v)) return false;
+    // Decimal places the student actually supplied — Bluebook requires a
+    // repeating/irrational value be truncated OR rounded to fill the field.
+    const dp = (clean.split('.')[1] || '').length;
+    return accepted.some(a => {
+      const w = numify(a);
+      if (isNaN(w)) return false;
+      if (Math.abs(w - v) < 1e-9) return true;
+      if (dp < 3) return false;                       // too few digits to fill the field
+      const f = Math.pow(10, dp);
+      const trunc = Math.trunc(w * f) / f, round = Math.round(w * f) / f;
+      return Math.abs(trunc - v) < 1e-9 || Math.abs(round - v) < 1e-9;
+    });
+  }
+  return q.ans.includes(LETTERS[resp]);
+}
+
+// ---- session state ---------------------------------------------------------
+let S = null;
+
+async function startSession(plan) {
+  S = {
+    plan,                     // [{sec, label, qs, mins, kind}]
+    stage: 0,
+    view: 'q',                // 'q' | 'review' | 'break'
+    idx: 0,
+    resp: plan.map(m => m.qs.map(() => null)),
+    marks: plan.map(m => m.qs.map(() => false)),
+    strikes: plan.map(m => m.qs.map(() => [])),
+    abc: false,
+    hideTimer: false,
+    endsAt: 0,
+    startedAt: Date.now(),
+  };
+  await beginStage();
+}
+
+/** Pull down this stage's question content, then start its clock. */
+async function beginStage() {
+  const m = S.plan[S.stage];
+  if (m.kind !== 'break' && !m.hydrated) {
+    try {
+      m.qs = await withLoading('Preparing ' + m.label.toLowerCase() + '…',
+        p => hydrate(m.qs, p));
+      m.hydrated = true;
+    } catch (e) {
+      return fatalDuringSession(e);
+    }
+  }
+  if (m.kind === 'break') { S.view = 'break'; }
+  else { S.view = 'q'; S.idx = 0; }
+  // clock starts only once the questions are actually on screen
+  S.endsAt = Date.now() + m.mins * 60000;
+  render();
+}
+
+async function advance() {
+  // adaptive routing: after module 1 of a section, pick the module-2 route
+  const cur = S.plan[S.stage], next = S.plan[S.stage + 1];
+  if (next && next.pending) {
+    const r = S.resp[S.stage], correct = cur.qs.filter((q, i) => isCorrect(q, r[i])).length;
+    const route = correct / cur.qs.length >= 0.6 ? 'm2hard' : 'm2easy';
+    next.qs = buildModule(next.sec, MIX[route]);
+    next.route = route;
+    next.label = SPEC[next.sec].name + ' — Module 2 (' + (route === 'm2hard' ? 'harder' : 'easier') + ')';
+    S.resp[S.stage + 1] = next.qs.map(() => null);
+    S.marks[S.stage + 1] = next.qs.map(() => false);
+    S.strikes[S.stage + 1] = next.qs.map(() => []);
+    next.pending = false;
+  }
+  S.stage++;
+  if (S.stage >= S.plan.length) return finish();
+  await beginStage();
+}
+
+/** Full-screen progress while a stage loads. */
+async function withLoading(msg, fn) {
+  clearInterval(tick);
+  app.innerHTML = `<div class="loadwrap"><div class="bootcard">
+    <h1>${msg}</h1><p id="lmsg">Fetching questions…</p>
+    <div class="pbar"><i id="lbar"></i></div></div></div>`;
+  const bar = $('#lbar'), lm = $('#lmsg');
+  return fn((done, total) => {
+    if (bar) bar.style.width = Math.round(done / total * 100) + '%';
+    if (lm) lm.textContent = `Fetching questions… ${done} of ${total}`;
+  });
+}
+
+function fatalDuringSession(e) {
+  clearInterval(tick);
+  app.innerHTML = `<div class="loadwrap"><div class="bootcard">
+    <h1>Couldn't load these questions</h1>
+    <p>${netMessage(e)}</p>
+    <button class="navbtn" id="bail">Back to menu</button></div></div>`;
+  $('#bail').onclick = () => { S = null; render(); };
+}
+
+const netMessage = e => navigator.onLine === false
+  ? "You're offline. Questions you've already used are cached and still work — reconnect for new ones."
+  : "College Board's question bank didn't respond (" + (e && e.message || 'network error') +
+    '). It may be temporarily down, or the endpoint may have changed.';
+
+// ---- timer -----------------------------------------------------------------
+let tick = null;
+function startTimer() {
+  clearInterval(tick);
+  tick = setInterval(() => {
+    const left = S ? S.endsAt - Date.now() : 0;
+    const el = $('#clock');
+    if (!el) return;
+    if (left <= 0) {
+      clearInterval(tick);
+      if (S.view === 'break') advance();
+      else { S.view = 'review'; render(); alert('Time is up on this module.'); }
+      return;
+    }
+    el.textContent = fmt(left);
+    el.classList.toggle('low', left < 5 * 60000);
+    const bt = $('#brkclock'); if (bt) bt.textContent = fmt(left);
+  }, 250);
+}
+const fmt = ms => {
+  const t = Math.max(0, Math.ceil(ms / 1000));
+  return String(t / 60 | 0).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+};
+
+// =============================== RENDERING ==================================
+function render() {
+  if (!S) return renderMenu();
+  if (S.view === 'break') return renderBreak();
+  if (S.view === 'results') return renderResults();
+  renderQuestion();
+}
+
+// ---- menu ------------------------------------------------------------------
+function renderMenu() {
+  clearInterval(tick);
+  const hist = LS.get('history', []);
+  const total = INDEX.rw.length + INDEX.math.length;
+  const active = INDEX.rw.filter(q => q.live).length + INDEX.math.filter(q => q.live).length;
+  const usable = poolCount('rw') + poolCount('math');
+  // safe counts are what's left after exclusion, regardless of the current toggle
+  const safeRW = INDEX.rw.filter(q => !q.live).length;
+  const safeMa = INDEX.math.filter(q => !q.live).length;
+  app.innerHTML = `
+  <div class="screen"><div class="wrap">
+    <h1>SAT module simulator</h1>
+    <p class="sub">${total.toLocaleString()} official questions from the College Board
+      Educator Question Bank — ${INDEX.rw.length.toLocaleString()} Reading &amp; Writing,
+      ${INDEX.math.length.toLocaleString()} Math. Bluebook timing and layout, real rationales.</p>
+
+    ${indexStale ? `<div class="guard off"><p class="danger" style="margin:0">
+      Couldn't reach College Board just now, so this is a cached index. Questions you've
+      already used still work; new ones need a connection.</p></div>` : ''}
+
+    <div class="guard ${noActive ? 'on' : 'off'}">
+      <label><input type="checkbox" id="noactive" ${noActive ? 'checked' : ''}>
+        <span><b>Exclude active questions</b>
+        <em>College Board flags ${active.toLocaleString()} of these as still in active use —
+        those are the ones that can turn up on a test you haven't taken yet.
+        ${noActive
+          ? `They're out of the pool, leaving <b>${(safeRW + safeMa).toLocaleString()}</b>
+             to practise on (${safeRW.toLocaleString()} R&amp;W, ${safeMa.toLocaleString()} Math).`
+          : `Excluding them would leave ${(safeRW + safeMa).toLocaleString()}
+             (${safeRW.toLocaleString()} R&amp;W, ${safeMa.toLocaleString()} Math).`}</em></span></label>
+      ${noActive ? '' : `<p class="danger">Active questions are in the pool right now.
+        Anything you see here may show up on a practice test later.</p>`}
+    </div>
+
+    <h2>Full length</h2>
+    <div class="cards">
+      <button class="card" data-go="full"><b>Full test</b><span>R&amp;W M1 + M2, 10-min break, Math M1 + M2 · 2 h 14 m</span></button>
+      <button class="card" data-go="sec:rw"><b>Reading &amp; Writing section</b><span>Two 27-question modules · 64 min</span></button>
+      <button class="card" data-go="sec:math"><b>Math section</b><span>Two 22-question modules · 70 min</span></button>
+    </div>
+
+    <h2>Single module</h2>
+    <div class="cards">
+      <button class="card" data-go="mod:rw:m1"><b>R&amp;W — Module 1</b><span>27 questions · 32 min · mixed difficulty</span></button>
+      <button class="card" data-go="mod:rw:m2hard"><b>R&amp;W — Module 2 (harder)</b><span>27 questions · 32 min · upper adaptive route</span></button>
+      <button class="card" data-go="mod:math:m1"><b>Math — Module 1</b><span>22 questions · 35 min · mixed difficulty</span></button>
+      <button class="card" data-go="mod:math:m2hard"><b>Math — Module 2 (harder)</b><span>22 questions · 35 min · upper adaptive route</span></button>
+    </div>
+
+    <h2>Custom drill</h2>
+    <form id="drill">
+      <fieldset><legend>Section</legend>
+        <div class="row">
+          <label><input type="radio" name="sec" value="rw" checked> Reading &amp; Writing</label>
+          <label><input type="radio" name="sec" value="math"> Math</label>
+        </div>
+      </fieldset>
+      <fieldset><legend>Domains</legend><div class="chips" id="domchips"></div></fieldset>
+      <fieldset><legend>Difficulty</legend>
+        <div class="chips" id="diffchips">
+          <span class="chip on" data-d="E">Easy</span>
+          <span class="chip on" data-d="M">Medium</span>
+          <span class="chip on" data-d="H">Hard</span>
+        </div>
+      </fieldset>
+      <fieldset><legend>Length</legend>
+        <div class="row">
+          <label>Questions <input type="number" id="dn" value="15" min="1" max="80"></label>
+          <label>Minutes <input type="number" id="dm" value="18" min="1" max="180"></label>
+          <span id="poolsize" style="color:var(--muted)"></span>
+        </div>
+      </fieldset>
+      <button class="navbtn" type="submit">Start drill</button>
+    </form>
+
+    <div class="note">
+      <b>What this is honest about:</b> the question bank is a flat pool, so module 2 is a
+      difficulty-weighted draw, not true adaptive delivery. Use this to rehearse pacing and
+      test methods. Keep the real Bluebook tests for score estimates — there is no scaled
+      score here on purpose.
+    </div>
+
+    ${hist.length ? `<h2>Recent sessions</h2><table class="brk">
+      <tr><th>When</th><th>What</th><th>Score</th><th>Accuracy</th></tr>
+      ${hist.slice(0, 8).map(h => `<tr><td>${h.when}</td><td>${h.what}</td>
+        <td>${h.correct}/${h.total}</td><td>${Math.round(h.correct / h.total * 100)}%</td></tr>`).join('')}
+    </table>` : ''}
+
+    <h2>Storage</h2>
+    <p style="font-size:13.5px;color:var(--muted);margin:0 0 12px">
+      Questions are fetched from College Board as you need them and kept in this browser,
+      so nothing is downloaded twice. <b id="cachen">…</b> cached so far.
+      Caching every question lets the app work with no connection at all — useful if you
+      want it dependable on exam week.
+    </p>
+    <div class="row">
+      <button class="chip" id="cacheall">Cache everything for offline</button>
+      <button class="chip" id="clearcache">Clear cached questions</button>
+    </div>
+
+    <p style="margin-top:26px;font-size:13px;color:var(--muted)">
+      Seen ${(pool('rw').filter(q => seen.has(q.id)).length
+             + pool('math').filter(q => seen.has(q.id)).length).toLocaleString()}
+      of the ${usable.toLocaleString()} available.
+      New sessions prefer questions you haven't had yet.
+      <button id="resetseen" class="chip" style="margin-left:8px">Reset seen</button>
+      ${hist.length ? '<button id="resethist" class="chip">Clear history</button>' : ''}
+    </p>
+  </div></div>`;
+
+  DB.count('body').then(n => { const el = $('#cachen'); if (el) el.textContent = n.toLocaleString(); });
+  $('#cacheall').onclick = async () => {
+    const all = [...INDEX.rw, ...INDEX.math];
+    const todo = all.length - await DB.count('body');
+    if (todo > 200 && !confirm(
+        `This downloads about ${todo.toLocaleString()} questions from College Board and takes `
+      + `roughly ${Math.ceil(todo * 0.042 / 60)} minute(s). Do it once, on a good connection.`)) return;
+    try {
+      await withLoading('Caching every question', p => hydrate(all, p));
+    } catch (e) { alert(netMessage(e)); }
+    renderMenu();
+  };
+  $('#clearcache').onclick = async () => {
+    if (!confirm('Delete every cached question? They will be re-fetched as needed.')) return;
+    await DB.clear('body'); MEM.clear(); renderMenu();
+  };
+
+  app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  $('#noactive').onchange = e => { noActive = e.target.checked; LS.set('noActive', noActive); renderMenu(); };
+  $('#resetseen').onclick = () => { seen = new Set(); LS.set('seen', []); renderMenu(); };
+  const rh = $('#resethist'); if (rh) rh.onclick = () => { LS.set('history', []); renderMenu(); };
+
+  // custom-drill wiring
+  const chips = $('#domchips');
+  const paintDoms = () => {
+    const sec = app.querySelector('input[name=sec]:checked').value;
+    chips.innerHTML = SPEC[sec].order.map(d =>
+      `<span class="chip on" data-dom="${d}">${DOMNAME[d]}</span>`).join('');
+    chips.querySelectorAll('.chip').forEach(c => c.onclick = () => { c.classList.toggle('on'); poolInfo(); });
+    poolInfo();
+  };
+  const picked = sel => [...app.querySelectorAll(sel + ' .chip.on')];
+  const poolInfo = () => {
+    const sec = app.querySelector('input[name=sec]:checked').value;
+    const doms = picked('#domchips').map(c => c.dataset.dom);
+    const diffs = picked('#diffchips').map(c => c.dataset.d);
+    const n = pool(sec).filter(q => doms.includes(q.dom) && diffs.includes(q.diff)).length;
+    $('#poolsize').textContent = n.toLocaleString() + ' questions match'
+      + (noActive ? ' (active excluded)' : '');
+  };
+  app.querySelectorAll('input[name=sec]').forEach(r => r.onchange = paintDoms);
+  $('#diffchips').querySelectorAll('.chip').forEach(c => c.onclick = () => { c.classList.toggle('on'); poolInfo(); });
+  paintDoms();
+
+  $('#drill').onsubmit = e => {
+    e.preventDefault();
+    const sec = app.querySelector('input[name=sec]:checked').value;
+    const doms = picked('#domchips').map(c => c.dataset.dom);
+    const diffs = picked('#diffchips').map(c => c.dataset.d);
+    if (!doms.length || !diffs.length) return alert('Pick at least one domain and one difficulty.');
+    const qs = buildCustom(sec, doms, diffs, +$('#dn').value);
+    if (!qs.length) return alert('No questions match that filter.');
+    startSession([{ sec, kind: 'drill', label: 'Custom drill — ' + SPEC[sec].name, qs, mins: +$('#dm').value }]);
+  };
+}
+
+function go(cmd) {
+  const [kind, a, b] = cmd.split(':');
+  if (kind === 'mod') {
+    const label = SPEC[a].name + ' — Module ' + (b === 'm1' ? '1' : '2');
+    return startSession([{ sec: a, kind: 'mod', label, qs: buildModule(a, MIX[b]), mins: SPEC[a].mins }]);
+  } else if (kind === 'sec') {
+    return startSession(sectionPlan(a));
+  }
+  return startSession([...sectionPlan('rw'),
+    { kind: 'break', label: 'Break', mins: 10, qs: [] },
+    ...sectionPlan('math')]);
+}
+function sectionPlan(sec) {
+  return [
+    { sec, kind: 'mod', label: SPEC[sec].name + ' — Module 1', qs: buildModule(sec, MIX.m1), mins: SPEC[sec].mins },
+    { sec, kind: 'mod', label: SPEC[sec].name + ' — Module 2', qs: [], mins: SPEC[sec].mins, pending: true },
+  ];
+}
+
+// ---- break -----------------------------------------------------------------
+function renderBreak() {
+  app.innerHTML = `<div class="screen"><div class="brk-mid">
+    <h1>Break</h1>
+    <div class="clock" id="brkclock">10:00</div>
+    <p class="sub" style="max-width:440px">Stand up, drink water. On the real test you may not
+      touch your phone or leave without permission. The Math section starts automatically.</p>
+    <button class="navbtn" id="skipbrk">Resume testing</button>
+  </div></div>`;
+  $('#skipbrk').onclick = advance;
+  startTimer();
+}
+
+// ---- question screen -------------------------------------------------------
+function renderQuestion() {
+  const m = S.plan[S.stage];
+  const isMath = m.sec === 'math';
+  const q = m.qs[S.idx];
+  const resp = S.resp[S.stage][S.idx];
+  const marked = S.marks[S.stage][S.idx];
+  const struck = S.strikes[S.stage][S.idx];
+
+  const stimHTML = q.sti ? `<div class="pane left"><div class="stim">${q.sti}</div></div>` : '';
+  const qbody = `
+    <div class="qhead">
+      <div class="qnum">${S.idx + 1}</div>
+      <div class="acts">
+        <button class="markbtn ${marked ? 'on' : ''}" id="mark">
+          ${marked ? '🚩' : '⚐'} Mark for Review</button>
+        ${q.type === 'mcq' ? `<button class="abcbtn ${S.abc ? 'on' : ''}" id="abc"
+          title="Answer eliminator">ABC</button>` : ''}
+      </div>
+    </div>
+    <div class="stem">${q.stem}</div>
+    ${q.type === 'spr' ? sprHTML(resp) : optsHTML(q, resp, struck)}`;
+
+  app.innerHTML = `
+    <header>
+      <div class="hleft">${m.label}
+        <small>${m.kind === 'drill' ? 'Custom drill' : 'Directions are the same as Bluebook'}</small></div>
+      <div class="timerwrap">
+        ${S.hideTimer ? '' : `<div class="timer" id="clock">--:--</div><div class="timerbar"></div>`}
+        <button class="tbtn" id="thide">${S.hideTimer ? 'Show' : 'Hide'}</button>
+      </div>
+      <div class="hright">
+        ${isMath ? `<button class="tool" id="calc"><span class="ic">🖩</span>Calculator</button>
+                    <button class="tool" id="ref"><span class="ic">📐</span>Reference</button>` : ''}
+        <button class="tool" id="quit"><span class="ic">✕</span>Exit</button>
+      </div>
+    </header>
+    <main><div class="split">
+      ${stimHTML}
+      <div class="pane ${q.sti ? 'right' : 'solo'}">${qbody}</div>
+    </div></main>
+    <footer>
+      <div class="who">Practice</div>
+      <button class="qpick" id="qpick">Question ${S.idx + 1} of ${m.qs.length} ▲</button>
+      <div class="footright">
+        <button class="navbtn ghost" id="back" ${S.idx === 0 ? 'disabled' : ''}>Back</button>
+        <button class="navbtn" id="next">${S.idx === m.qs.length - 1 ? 'Review' : 'Next'}</button>
+      </div>
+    </footer>`;
+
+  // ---- wiring
+  $('#thide').onclick = () => { S.hideTimer = !S.hideTimer; render(); };
+  $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { S = null; render(); } };
+  $('#mark').onclick = () => { S.marks[S.stage][S.idx] = !marked; render(); };
+  const abcBtn = $('#abc');
+  if (abcBtn) abcBtn.onclick = () => { S.abc = !S.abc; render(); };
+  $('#back').onclick = () => { if (S.idx > 0) { S.idx--; render(); } };
+  $('#next').onclick = () => {
+    if (S.idx < m.qs.length - 1) { S.idx++; render(); }
+    else { S.view = 'review'; renderReview(); }
+  };
+  $('#qpick').onclick = openNav;
+  if (isMath) {
+    $('#calc').onclick = () => window.open('https://www.desmos.com/testing/digital-sat', '_blank');
+    $('#ref').onclick = showReference;
+  }
+
+  if (q.type === 'spr') {
+    const inp = $('#sprin');
+    inp.oninput = () => {
+      S.resp[S.stage][S.idx] = inp.value;
+      $('#sprprev').textContent = inp.value ? 'Answer preview: ' + inp.value : '';
+    };
+    inp.focus();
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  } else {
+    app.querySelectorAll('.opt').forEach((el, i) => {
+      el.onclick = ev => {
+        if (ev.target.closest('.strikecol')) return;
+        S.resp[S.stage][S.idx] = (resp === i ? null : i);
+        render();
+      };
+    });
+    app.querySelectorAll('.strikecol').forEach((el, i) => {
+      el.onclick = ev => {
+        ev.stopPropagation();
+        const arr = S.strikes[S.stage][S.idx];
+        const at = arr.indexOf(i);
+        if (at >= 0) arr.splice(at, 1); else arr.push(i);
+        if (S.resp[S.stage][S.idx] === i) S.resp[S.stage][S.idx] = null;
+        render();
+      };
+    });
+  }
+  startTimer();
+}
+
+const optsHTML = (q, resp, struck) => `
+  <ul class="opts ${S.abc ? 'abcmode' : ''}">
+    ${q.opts.map((o, i) => `
+      <li><button class="opt ${resp === i ? 'sel' : ''} ${struck.includes(i) ? 'struck' : ''}">
+        <span class="ltr">${LETTERS[i]}</span><span class="body">${o}</span>
+        ${S.abc ? `<span class="strikecol">${LETTERS[i]}</span>` : ''}
+      </button></li>`).join('')}
+  </ul>`;
+
+const sprHTML = resp => `
+  <div class="sprwrap">
+    <input id="sprin" type="text" autocomplete="off" spellcheck="false"
+      value="${resp == null ? '' : String(resp).replace(/"/g, '&quot;')}" placeholder="Type answer">
+    <div class="sprprev" id="sprprev">${resp ? 'Answer preview: ' + resp : ''}</div>
+    <div class="sprprev">Fractions like <code>3/4</code> and decimals both count. No commas,
+      no % or $ signs. Negative answers use a leading minus.</div>
+  </div>`;
+
+// ---- question navigator ----------------------------------------------------
+function openNav() {
+  const m = S.plan[S.stage];
+  const pop = document.createElement('div');
+  pop.className = 'navpop';
+  pop.innerHTML = `<div class="navcard">
+    <h3>${m.label}</h3>
+    <div class="legend"><i>▾ current</i><i>⬜ unanswered</i><i>🟦 answered</i><i>⚑ for review</i></div>
+    <div class="grid">${m.qs.map((q, i) => {
+      const a = S.resp[S.stage][i];
+      const done = a !== null && a !== '';
+      return `<button class="gcell ${done ? 'done' : ''} ${i === S.idx ? 'cur' : ''}
+        ${S.marks[S.stage][i] ? 'mk' : ''}" data-i="${i}">${i + 1}</button>`;
+    }).join('')}</div>
+    <button class="navbtn ghost go" id="goreview">Go to Review Page</button>
+  </div>`;
+  document.body.appendChild(pop);
+  const close = () => pop.remove();
+  pop.onclick = e => { if (e.target === pop) close(); };
+  pop.querySelectorAll('.gcell').forEach(c => c.onclick = () => { S.idx = +c.dataset.i; close(); render(); });
+  $('#goreview', pop).onclick = () => { close(); S.view = 'review'; renderReview(); };
+}
+
+// ---- pre-submit review page ------------------------------------------------
+function renderReview() {
+  const m = S.plan[S.stage];
+  const last = S.stage === S.plan.length - 1;
+  app.innerHTML = `
+    <header>
+      <div class="hleft">${m.label}<small>Check Your Work</small></div>
+      <div class="timerwrap">
+        ${S.hideTimer ? '' : `<div class="timer" id="clock">--:--</div><div class="timerbar"></div>`}
+        <button class="tbtn" id="thide">${S.hideTimer ? 'Show' : 'Hide'}</button></div>
+      <div class="hright"><button class="tool" id="quit"><span class="ic">✕</span>Exit</button></div>
+    </header>
+    <main><div class="pane solo">
+      <h1 style="text-align:center">Check Your Work</h1>
+      <p class="sub" style="text-align:center">On test day you can't return to this module
+        once you move on.</p>
+      <div class="legend"><i>⬜ unanswered</i><i>🟦 answered</i><i>⚑ for review</i></div>
+      <div class="grid" style="max-width:520px;margin:0 auto">${m.qs.map((q, i) => {
+        const a = S.resp[S.stage][i]; const done = a !== null && a !== '';
+        return `<button class="gcell ${done ? 'done' : ''} ${S.marks[S.stage][i] ? 'mk' : ''}"
+          data-i="${i}">${i + 1}</button>`;
+      }).join('')}</div>
+      <p style="text-align:center;margin-top:26px;color:var(--muted);font-size:14px">
+        ${S.resp[S.stage].filter(a => a === null || a === '').length} unanswered</p>
+    </div></main>
+    <footer>
+      <div class="who">Practice</div><div></div>
+      <div class="footright">
+        <button class="navbtn ghost" id="back">Back to questions</button>
+        <button class="navbtn" id="submit">${last ? 'Finish and score' : 'Next module'}</button>
+      </div>
+    </footer>`;
+  $('#thide').onclick = () => { S.hideTimer = !S.hideTimer; renderReview(); };
+  $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { S = null; render(); } };
+  $('#back').onclick = () => { S.view = 'q'; render(); };
+  $('#submit').onclick = () => {
+    const un = S.resp[S.stage].filter(a => a === null || a === '').length;
+    if (un && !confirm(un + ' question(s) unanswered. Move on anyway?')) return;
+    advance();
+  };
+  app.querySelectorAll('.gcell').forEach(c => c.onclick = () => {
+    S.idx = +c.dataset.i; S.view = 'q'; render();
+  });
+  startTimer();
+}
+
+// ---- results ---------------------------------------------------------------
+function finish() {
+  clearInterval(tick);
+  S.view = 'results';
+  const flat = [];
+  S.plan.forEach((m, si) => m.qs.forEach((q, i) =>
+    flat.push({ q, resp: S.resp[si][i], ok: isCorrect(q, S.resp[si][i]), mod: m.label, sec: m.sec })));
+  S.flat = flat;
+  const correct = flat.filter(f => f.ok).length;
+  const hist = LS.get('history', []);
+  hist.unshift({
+    when: new Date().toLocaleString(),
+    what: S.plan.filter(m => m.kind !== 'break').map(m => m.label).join(' + '),
+    correct, total: flat.length,
+  });
+  LS.set('history', hist.slice(0, 40));
+  renderResults();
+}
+
+function renderResults() {
+  const flat = S.flat;
+  const correct = flat.filter(f => f.ok).length;
+  const blank = flat.filter(f => f.resp === null || f.resp === '').length;
+  const mins = Math.round((Date.now() - S.startedAt) / 60000);
+
+  const group = (keyFn) => {
+    const g = {};
+    for (const f of flat) { const k = keyFn(f); (g[k] ||= { n: 0, ok: 0 }); g[k].n++; if (f.ok) g[k].ok++; }
+    return g;
+  };
+  const tbl = (g, head) => `<table class="brk"><tr><th>${head}</th><th>Correct</th><th></th></tr>
+    ${Object.entries(g).sort((a, b) => a[1].ok / a[1].n - b[1].ok / b[1].n).map(([k, v]) => {
+      const p = Math.round(v.ok / v.n * 100);
+      return `<tr><td>${k}</td><td>${v.ok}/${v.n} · ${p}%</td>
+        <td><span class="bar"><i style="width:${p}%"></i></span></td></tr>`;
+    }).join('')}</table>`;
+
+  app.innerHTML = `<div class="screen"><div class="wrap">
+    <h1>Results</h1>
+    <p class="sub">${S.plan.filter(m => m.kind !== 'break').map(m => m.label).join(' · ')}</p>
+    <div class="big">
+      <div class="stat"><b>${correct}/${flat.length}</b><span>Raw correct</span></div>
+      <div class="stat"><b>${Math.round(correct / flat.length * 100)}%</b><span>Accuracy</span></div>
+      <div class="stat"><b>${blank}</b><span>Left blank</span></div>
+      <div class="stat"><b>${mins}m</b><span>Elapsed</span></div>
+    </div>
+    <div class="note">No scaled score. This pool isn't adaptive and isn't equated, so a
+      200–800 number here would be fiction. Read the domain table instead — that's the part
+      that actually tells you where to spend the next two weeks.</div>
+
+    <h2>By domain</h2>${tbl(group(f => f.q.domName), 'Domain')}
+    <h2>By skill</h2>${tbl(group(f => f.q.skill), 'Skill')}
+    <h2>By difficulty</h2>${tbl(group(f => ({ E: 'Easy', M: 'Medium', H: 'Hard' })[f.q.diff]), 'Level')}
+
+    <h2>Question review</h2>
+    <p class="sub">Wrong and blank answers first. Rationales are College Board's own.</p>
+    <div class="row" style="margin-bottom:16px">
+      <label><input type="checkbox" id="onlybad" checked> Show only wrong / blank</label>
+    </div>
+    <div id="revlist"></div>
+    <button class="navbtn" id="home" style="margin-top:26px">Back to menu</button>
+  </div></div>`;
+
+  const paint = () => {
+    const only = $('#onlybad').checked;
+    const list = flat.map((f, i) => ({ f, i })).filter(x => !only || !x.f.ok);
+    $('#revlist').innerHTML = list.length ? list.map(({ f, i }) => {
+      const q = f.q;
+      const given = q.type === 'spr'
+        ? (f.resp || '—')
+        : (f.resp == null ? '—' : LETTERS[f.resp]);
+      const right = q.type === 'spr' ? q.ans.join(' or ') : q.ans.join('/');
+      return `<div class="revq ${f.ok ? '' : 'bad'}">
+        <div class="tag"><b>Q${i + 1}</b><span>${q.domName}</span><span>${q.skill}</span>
+          <span>${({ E: 'Easy', M: 'Medium', H: 'Hard' })[q.diff]}</span>
+          <span>Your answer: <b>${given}</b></span>
+          <span>Correct: <b>${right}</b></span>
+          <span>${f.ok ? '✅' : '❌'}</span></div>
+        ${q.sti ? `<div class="stim">${q.sti}</div>` : ''}
+        <div class="stem">${q.stem}</div>
+        ${q.type === 'mcq' ? `<ul class="opts">${q.opts.map((o, j) => `
+          <li><div class="opt ${q.ans.includes(LETTERS[j]) ? 'correct' : (f.resp === j ? 'wrong' : '')}">
+            <span class="ltr">${LETTERS[j]}</span><span class="body">${o}</span></div></li>`).join('')}</ul>` : ''}
+        <details class="rat"><summary>Explanation</summary><div>${q.rat}</div></details>
+      </div>`;
+    }).join('') : '<p class="sub">Nothing wrong. Go take a real one.</p>';
+  };
+  $('#onlybad').onchange = paint;
+  paint();
+  $('#home').onclick = () => { S = null; render(); };
+}
+
+// ---- math reference sheet --------------------------------------------------
+function showReference() {
+  const pop = document.createElement('div');
+  pop.className = 'navpop';
+  pop.innerHTML = `<div class="navcard" style="width:min(680px,94vw);max-height:88vh;overflow:auto">
+    <h3>Reference</h3>
+    <div style="font-size:14.5px;line-height:1.9;margin-top:14px">
+      <p><b>Circle</b> — A = πr², C = 2πr</p>
+      <p><b>Rectangle</b> — A = ℓw · <b>Triangle</b> — A = ½bh</p>
+      <p><b>Pythagorean</b> — c² = a² + b²</p>
+      <p><b>Special right triangles</b> — 30-60-90 sides x, x√3, 2x · 45-45-90 sides s, s, s√2</p>
+      <p><b>Rectangular solid</b> — V = ℓwh · <b>Cylinder</b> — V = πr²h</p>
+      <p><b>Sphere</b> — V = (4/3)πr³ · <b>Cone</b> — V = (1/3)πr²h · <b>Pyramid</b> — V = (1/3)ℓwh</p>
+      <p>The number of degrees of arc in a circle is 360. The number of radians of arc in a
+         circle is 2π. The sum of the measures in degrees of the angles of a triangle is 180.</p>
+    </div>
+    <button class="navbtn go" id="closeref">Close</button></div>`;
+  document.body.appendChild(pop);
+  const close = () => pop.remove();
+  pop.onclick = e => { if (e.target === pop) close(); };
+  $('#closeref', pop).onclick = close;
+}
+
+// ---- keyboard --------------------------------------------------------------
+document.addEventListener('keydown', e => {
+  if (!S || S.view !== 'q') return;
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') $('#next').click(); return; }
+  const m = S.plan[S.stage], q = m.qs[S.idx];
+  if (e.key === 'ArrowRight') $('#next').click();
+  else if (e.key === 'ArrowLeft') { const b = $('#back'); if (!b.disabled) b.click(); }
+  else if (q.type === 'mcq' && /^[a-dA-D]$/.test(e.key)) {
+    const i = 'abcd'.indexOf(e.key.toLowerCase());
+    S.resp[S.stage][S.idx] = S.resp[S.stage][S.idx] === i ? null : i;
+    render();
+  } else if (e.key.toLowerCase() === 'm') { S.marks[S.stage][S.idx] = !S.marks[S.stage][S.idx]; render(); }
+});
+
+// ---- boot ------------------------------------------------------------------
+async function boot() {
+  const msg = $('#bootmsg'), bar = $('#bootbar');
+  bar.parentElement.classList.add('idle');
+  try {
+    await DB.open();
+    await loadIndex(t => { msg.textContent = t; });
+    bar.parentElement.classList.remove('idle');
+    bar.style.width = '100%';
+    $('#boot').classList.add('hidden');
+    app.classList.remove('hidden');
+    renderMenu();
+  } catch (e) {
+    bar.parentElement.classList.add('hidden');
+    msg.textContent = netMessage(e);
+    $('#bootextra').innerHTML = `
+      <button class="navbtn" id="retry">Try again</button>
+      <p style="margin-top:18px">If the question bank has gone behind a login for good, you can
+      still run this from a bundle you generated yourself with
+      <code>refresh_questions.py</code>:</p>
+      <input type="file" id="bundle" accept=".js,.json">`;
+    $('#retry').onclick = () => boot();
+    $('#bundle').onchange = e => loadBundle(e.target.files[0]);
+  }
+}
+
+/** Fallback path: import a questions.js produced by refresh_questions.py. */
+async function loadBundle(file) {
+  const msg = $('#bootmsg');
+  try {
+    const text = await file.text();
+    const start = text.indexOf('=') + 1;
+    const data = JSON.parse(text.slice(start, text.lastIndexOf('}') + 1));
+    if (!data.rw || !data.math) throw new Error('not a questions bundle');
+
+    const bodies = [];
+    for (const sec of ['rw', 'math']) {
+      INDEX[sec] = data[sec].map(q => {
+        const ext = q.ext || q.id;
+        bodies.push([ext, { type: q.type, sti: q.sti, stem: q.stem, opts: q.opts, ans: q.ans, rat: q.rat }]);
+        return { id: q.id, ext, dom: q.dom, domName: q.domName, skill: q.skill,
+                 diff: q.diff, live: q.live || 0, type: q.type };
+      });
+    }
+    await DB.putMany('body', bodies);
+    // ts:0 marks this index as always-stale, so a later visit still prefers the
+    // live bank and only falls back to the bundle while the API is unreachable.
+    // A bundle is a lifeboat, not a replacement.
+    await DB.put('meta', 'index', { ts: 0, data: INDEX });
+    $('#boot').classList.add('hidden');
+    app.classList.remove('hidden');
+    renderMenu();
+  } catch (err) {
+    msg.textContent = 'That file could not be read as a question bundle (' + err.message + ').';
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

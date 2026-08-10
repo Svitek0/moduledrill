@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# NEVER COMMIT QUESTION CONTENT.
+#
+# questions.js is a local cache of College Board's copyrighted questions
+# ---------------------------------------------------------------------------
+questions.js
+questions*.js
+!gridins.js
+*.bundle.js
+
+# private notes — internal planning, not for a public repo
+RELEASE.md
+
+# scratch
+__pycache__/
+*.pyc
+.DS_Store
