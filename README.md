@@ -13,7 +13,7 @@ I built this because I was practising in sets of ten questions and tracking my m
 spreadsheet, which tells you nothing about pacing, and because I didn't want to burn one of
 my six real practice tests every time I wanted to try a new approach.
 
-**[Open it →](#)** *(add your URL here)*
+**[Open it →](https://moduledrill.com)**
 
 ---
 
@@ -154,6 +154,17 @@ Two things worth knowing if you build on this:
 
 Please be gentle with their servers: this app caches aggressively and fetches at most a
 module at a time for exactly that reason.
+
+## Privacy
+
+Your practice history, settings and cached questions live in **your own browser** —
+IndexedDB and localStorage — and are never sent anywhere. There are no accounts and no
+server, so there is nothing for me to see even if I wanted to.
+
+The site uses Cloudflare Web Analytics, which is cookieless and counts page views,
+referrers and countries without identifying anyone. That's the whole of the data
+collection. Questions are requested by your browser from College Board directly, so those
+requests go to them and not through this site.
 
 ## Content and licensing
 

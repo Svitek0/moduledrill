@@ -3,7 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SAT Practice — module simulator</title>
+<title>ModuleDrill — timed digital SAT practice</title>
+<meta name="description" content="Free timed practice modules for the digital SAT, built on College Board's public question bank. Bluebook timing and layout, official explanations, and it leaves out the questions that would spoil the practice tests you haven't taken yet.">
+<link rel="canonical" href="https://moduledrill.com/">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#0d5ac1">
+
+<!-- Link previews: what Reddit, Discord, iMessage and X show when the URL is shared. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ModuleDrill">
+<meta property="og:url" content="https://moduledrill.com/">
+<meta property="og:title" content="ModuleDrill — timed digital SAT practice">
+<meta property="og:description" content="Timed modules at real Bluebook pacing, with the active questions excluded so you don't spoil the practice tests you have left. Free, no account, nothing tracked.">
+<meta property="og:image" content="https://moduledrill.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ModuleDrill — timed digital SAT practice modules">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ModuleDrill — timed digital SAT practice">
+<meta name="twitter:description" content="Timed modules at real Bluebook pacing, with the active questions excluded so you don't spoil the practice tests you have left.">
+<meta name="twitter:image" content="https://moduledrill.com/og-image.png">
+
+<!-- Inline SVG favicon: no extra request, and it still works offline. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d5ac1'/%3E%3Crect x='13' y='3' width='6' height='3' rx='1.2' fill='%23fff'/%3E%3Ccircle cx='16' cy='18' r='8.5' fill='none' stroke='%23fff' stroke-width='2.6'/%3E%3Cpath d='M16 13.5V18l3.2 2' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
 <style>
   :root{
     --bg:#fff; --fg:#1e1e1e; --muted:#5b6772; --line:#c7ccd1; --line2:#e3e6e9;
@@ -38,7 +60,12 @@
   /* ---------- question area ---------- */
   main{flex:1 1 auto;overflow:hidden;display:flex}
   .split{display:flex;width:100%}
-  .pane{overflow-y:auto;padding:26px 34px}
+  /* position:relative makes these scroll containers the containing block for
+     absolutely positioned descendants. Without it, the .sr-only spans inside
+     question content escape to the page root and stretch the document to the
+     height of the whole review list — a huge blank area you can scroll into
+     below the app. */
+  .pane{overflow-y:auto;padding:26px 34px;position:relative}
   .pane.left{width:50%;border-right:1px solid var(--line)}
   .pane.right{width:50%}
   .pane.solo{width:100%;max-width:820px;margin:0 auto}
@@ -128,7 +155,7 @@
   .navcard .go{display:block;margin:20px auto 0}
 
   /* ---------- generic screens ---------- */
-  .screen{flex:1;overflow-y:auto;padding:38px 26px 60px}
+  .screen{flex:1;overflow-y:auto;padding:38px 26px 60px;position:relative}
   .wrap{max-width:920px;margin:0 auto}
   h1{font-size:27px;margin:0 0 6px}
   h2{font-size:20px;margin:30px 0 12px}
@@ -386,15 +413,66 @@ async function loadIndex(onMsg) {
 // ---- question bodies -------------------------------------------------------
 const MEM = new Map();           // ext -> body, within this page load
 
+/* --------------------------------------------------------------------------
+   MathML repair.
+
+   College Board's content still uses <mfenced> for brackets. It was dropped
+   from MathML Core, so Chrome and Safari render nothing at all for it — and
+   44% of the maths questions contain one. Untreated, "V(x) = 11x(x-1)" comes
+   out as "Vx = 11xx-1", which makes the section unanswerable.
+
+   Done over the DOM rather than with a regex: <mfenced> nests, and a
+   non-greedy pattern happily pairs an outer opening tag with an inner closing
+   one. Innermost-first unwinds nesting correctly.
+   -------------------------------------------------------------------------- */
+const MML_NS = 'http://www.w3.org/1998/Math/MathML';
+const BODY_SCHEMA = 2;          // bump to discard bodies cached before a fix
+
+function expandMfenced(el) {
+  const doc = el.ownerDocument;
+  const attr = (n, dflt) => el.hasAttribute(n) ? el.getAttribute(n) : dflt;
+  const open = attr('open', '('), close = attr('close', ')');
+  const seps = attr('separators', ',').replace(/\s+/g, '');
+  const mo = ch => { const o = doc.createElementNS(MML_NS, 'mo'); o.textContent = ch; return o; };
+
+  const row = doc.createElementNS(MML_NS, 'mrow');
+  if (open) row.appendChild(mo(open));
+  const kids = Array.from(el.children);
+  if (kids.length) {
+    // multiple children are a comma-separated list: (x, y)
+    kids.forEach((k, i) => {
+      if (i && seps) row.appendChild(mo(seps[Math.min(i - 1, seps.length - 1)]));
+      row.appendChild(k);                    // appendChild moves the node
+    });
+  } else {
+    while (el.firstChild) row.appendChild(el.firstChild);
+  }
+  if (close) row.appendChild(mo(close));
+  el.replaceWith(row);
+}
+
+function fixMathML(html) {
+  if (!html || html.indexOf('<mfenced') === -1) return html;   // cheap fast path
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  let el, guard = 0;
+  while ((el = doc.querySelector('mfenced')) && guard++ < 10000) {
+    let inner = el, deeper;
+    while ((deeper = inner.querySelector('mfenced'))) inner = deeper;
+    expandMfenced(inner);
+  }
+  return doc.body.innerHTML;
+}
+
 function normalise(d) {
   const opts = d.answerOptions || [];
   return {
+    v: BODY_SCHEMA,
     type: d.type || 'mcq',
-    sti: d.stimulus || '',
-    stem: d.stem || '',
-    opts: opts.map(o => o.content || ''),
+    sti: fixMathML(d.stimulus || ''),
+    stem: fixMathML(d.stem || ''),
+    opts: opts.map(o => fixMathML(o.content || '')),
     ans: d.correct_answer || [],
-    rat: d.rationale || '',
+    rat: fixMathML(d.rationale || ''),
   };
 }
 
@@ -403,7 +481,9 @@ async function hydrate(entries, onProgress) {
   const missing = entries.filter(e => !MEM.has(e.ext));
   if (missing.length) {
     const stored = await DB.getMany('body', missing.map(e => e.ext));
-    for (const [k, v] of Object.entries(stored)) MEM.set(k, v);
+    // Ignore anything cached under an older schema — bodies stored before the
+    // MathML repair still have their brackets stripped out.
+    for (const [k, v] of Object.entries(stored)) if (v && v.v === BODY_SCHEMA) MEM.set(k, v);
   }
   const need = entries.filter(e => !MEM.has(e.ext));
   let done = entries.length - need.length;
@@ -474,6 +554,27 @@ const poolCount = sec => pool(sec).length;
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const DIFFRANK = { E: 0, M: 1, H: 2 };
 
+// Within a Reading and Writing domain the real test runs through the skills in a
+// fixed sequence, not just easy→hard. Without this you get vocab landing after a
+// Text Structure question, which breaks the standard "skip ahead to conventions,
+// come back for vocab" approach.
+// Keys are lowercased: College Board's own data ships both "Cross-Text
+// Connections" and "Cross-text Connections".
+const SKILL_ORDER = {
+  CAS: ['words in context', 'text structure and purpose', 'cross-text connections'],
+  INI: ['central ideas and details', 'command of evidence', 'inferences'],
+  EOI: ['transitions', 'rhetorical synthesis'],
+  // SEC (Boundaries / Form, Structure, and Sense) is deliberately absent — real
+  // modules appear to interleave those two rather than block them, so it stays
+  // ordered by difficulty alone.
+};
+const skillRank = q => {
+  const order = SKILL_ORDER[q.dom];
+  if (!order) return 0;
+  const i = order.indexOf((q.skill || '').trim().toLowerCase());
+  return i === -1 ? order.length : i;      // unknown skills sort last, not first
+};
+
 /** Pick n from pool, preferring unseen, honouring a difficulty mix. */
 function draw(pool, n, mix) {
   const byDiff = { E: [], M: [], H: [] };
@@ -509,7 +610,9 @@ function buildModule(sec, mix) {
     } else {
       picked = draw(dp, spec.doms[dom], mix);
     }
-    if (sec === 'rw') picked.sort((a, b) => DIFFRANK[a.diff] - DIFFRANK[b.diff]); // easy→hard in domain
+    // easy→hard *within each skill*, with the skills themselves in test order
+    if (sec === 'rw') picked.sort((a, b) => skillRank(a) - skillRank(b)
+                                         || DIFFRANK[a.diff] - DIFFRANK[b.diff]);
     out.push(...picked);
   }
   if (sec === 'math') {
@@ -943,7 +1046,10 @@ function renderQuestion() {
   };
   $('#qpick').onclick = openNav;
   if (isMath) {
-    $('#calc').onclick = () => window.open('https://www.desmos.com/testing/digital-sat', '_blank');
+    // The College Board build of Desmos — the same one embedded in Bluebook.
+    // (/testing/digital-sat is just Desmos's landing page and asks for a US state.)
+    $('#calc').onclick = () =>
+      window.open('https://www.desmos.com/testing/collegeboard/graphing', '_blank');
     $('#ref').onclick = showReference;
   }
 
@@ -1232,7 +1338,14 @@ async function loadBundle(file) {
     for (const sec of ['rw', 'math']) {
       INDEX[sec] = data[sec].map(q => {
         const ext = q.ext || q.id;
-        bodies.push([ext, { type: q.type, sti: q.sti, stem: q.stem, opts: q.opts, ans: q.ans, rat: q.rat }]);
+        // Stamp the schema, or hydrate() treats these as stale and tries to
+        // re-fetch — precisely when the API is unreachable. fixMathML is also
+        // run here so a bundle generated before the repair still renders.
+        bodies.push([ext, {
+          v: BODY_SCHEMA, type: q.type,
+          sti: fixMathML(q.sti), stem: fixMathML(q.stem),
+          opts: (q.opts || []).map(fixMathML), ans: q.ans, rat: fixMathML(q.rat),
+        }]);
         return { id: q.id, ext, dom: q.dom, domName: q.domName, skill: q.skill,
                  diff: q.diff, live: q.live || 0, type: q.type };
       });
@@ -1251,6 +1364,44 @@ async function loadBundle(file) {
 }
 
 boot();
+</script>
+
+<!-- ---------------------------------------------------------------------------
+     Cloudflare Web Analytics — cookieless, stores no personal data, needs no
+     consent banner. Reports page views, referrers and countries; identifies
+     nobody. Works whether or not Cloudflare proxies the domain, so the DNS
+     record can stay on grey cloud and keep GitHub Pages' HTTPS intact.
+
+     Get the token: Cloudflare dashboard -> Analytics & Logs -> Web Analytics
+                    -> Add a site -> enter the domain -> copy the token.
+     --------------------------------------------------------------------------- -->
+<script>
+(function () {
+  var TOKEN = '9f38dabbbd0e4f6396292f792075c277';   // public by design; lives in page source
+
+  // Never beacon from a dev machine: it can't report cross-origin from
+  // localhost anyway, and the failed request just litters the console — which
+  // also matters because this app is meant to run fine with no network at all.
+  var dev = location.protocol === 'file:'
+         || ['localhost', '127.0.0.1', '::1', ''].indexOf(location.hostname) !== -1;
+  if (dev) return;
+
+  if (TOKEN === 'CF_TOKEN_HERE') {
+    console.warn('[analytics] Cloudflare Web Analytics token not set, so no '
+               + 'traffic is being recorded. Replace CF_TOKEN_HERE in index.html.');
+    return;
+  }
+
+  // Mirrors the snippet Cloudflare currently issues. Today's beacon.min.js is a
+  // plain IIFE that would also run as a classic script, but tracking their
+  // snippet means we keep working if that changes. Module scripts defer by
+  // default, so no defer attribute is needed.
+  var s = document.createElement('script');
+  s.type = 'module';
+  s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+  s.setAttribute('data-cf-beacon', JSON.stringify({ token: TOKEN }));
+  document.body.appendChild(s);
+})();
 </script>
 </body>
 </html>
