@@ -158,6 +158,11 @@
   .screen{flex:1;overflow-y:auto;padding:38px 26px 60px;position:relative}
   .wrap{max-width:920px;margin:0 auto}
   h1{font-size:27px;margin:0 0 6px}
+  .menuhead{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+  .aboutlink{margin-left:auto;color:var(--blue);font-size:14.5px;font-weight:600;
+    text-decoration:none;border:1.5px solid var(--line);border-radius:16px;padding:5px 15px;
+    white-space:nowrap}
+  .aboutlink:hover{border-color:var(--blue);background:#f3f7fd}
   h2{font-size:20px;margin:30px 0 12px}
   .sub{color:var(--muted);margin:0 0 26px;font-size:15px}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:14px}
@@ -235,7 +240,7 @@
 <body>
 <div id="boot">
   <div class="bootcard">
-    <h1>SAT module simulator</h1>
+    <h1>ModuleDrill</h1>
     <p id="bootmsg">Loading the question index…</p>
     <div class="pbar"><i id="bootbar"></i></div>
     <div id="bootextra"></div>
@@ -247,8 +252,7 @@
 <script>
 /* =========================================================================
    Digital-SAT-style module simulator over the College Board Question Bank.
-   Structure is modelled on Bluebook; the question pool is NOT adaptive, so
-   "module 2" here means a difficulty-weighted draw, not a real adaptive stage.
+   Structure is modelled on Bluebook
    ========================================================================= */
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -413,18 +417,6 @@ async function loadIndex(onMsg) {
 // ---- question bodies -------------------------------------------------------
 const MEM = new Map();           // ext -> body, within this page load
 
-/* --------------------------------------------------------------------------
-   MathML repair.
-
-   College Board's content still uses <mfenced> for brackets. It was dropped
-   from MathML Core, so Chrome and Safari render nothing at all for it — and
-   44% of the maths questions contain one. Untreated, "V(x) = 11x(x-1)" comes
-   out as "Vx = 11xx-1", which makes the section unanswerable.
-
-   Done over the DOM rather than with a regex: <mfenced> nests, and a
-   non-greedy pattern happily pairs an outer opening tag with an inner closing
-   one. Innermost-first unwinds nesting correctly.
-   -------------------------------------------------------------------------- */
 const MML_NS = 'http://www.w3.org/1998/Math/MathML';
 const BODY_SCHEMA = 2;          // bump to discard bodies cached before a fix
 
@@ -796,7 +788,10 @@ function renderMenu() {
   const safeMa = INDEX.math.filter(q => !q.live).length;
   app.innerHTML = `
   <div class="screen"><div class="wrap">
-    <h1>SAT module simulator</h1>
+    <div class="menuhead">
+      <h1>ModuleDrill</h1>
+      <a class="aboutlink" href="about/">About this app</a>
+    </div>
     <p class="sub">${total.toLocaleString()} official questions from the College Board
       Educator Question Bank — ${INDEX.rw.length.toLocaleString()} Reading &amp; Writing,
       ${INDEX.math.length.toLocaleString()} Math. Bluebook timing and layout, real rationales.</p>
