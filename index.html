@@ -695,6 +695,7 @@ async function beginStage() {
   else { S.view = 'q'; S.idx = 0; }
   // clock starts only once the questions are actually on screen
   S.endsAt = Date.now() + m.mins * 60000;
+  S.expired = false;                        // each stage gets its own clock
   render();
 }
 
@@ -749,17 +750,26 @@ let tick = null;
 function startTimer() {
   clearInterval(tick);
   tick = setInterval(() => {
-    const left = S ? S.endsAt - Date.now() : 0;
-    const el = $('#clock');
-    if (!el) return;
+    if (!S) { clearInterval(tick); return; }
+    const left = S.endsAt - Date.now();
+
     if (left <= 0) {
       clearInterval(tick);
+      // Every screen restarts the clock when it renders, so without this guard
+      // expiry re-fires on the screen it just navigated to — which is how the
+      // old alert() ended up reappearing forever with no way out.
+      if (S.expired) return;
+      S.expired = true;
       if (S.view === 'break') advance();
-      else { S.view = 'review'; render(); alert('Time is up on this module.'); }
+      else { S.view = 'review'; renderReview(); }
       return;
     }
-    el.textContent = fmt(left);
-    el.classList.toggle('low', left < 5 * 60000);
+
+    // Display updates happen after the expiry check on purpose: this used to
+    // bail out early when #clock was absent, so hiding the timer meant the
+    // module never ended at all.
+    const el = $('#clock');
+    if (el) { el.textContent = fmt(left); el.classList.toggle('low', left < 5 * 60000); }
     const bt = $('#brkclock'); if (bt) bt.textContent = fmt(left);
   }, 250);
 }
@@ -1127,14 +1137,22 @@ function renderReview() {
     <header>
       <div class="hleft">${m.label}<small>Check Your Work</small></div>
       <div class="timerwrap">
-        ${S.hideTimer ? '' : `<div class="timer" id="clock">--:--</div><div class="timerbar"></div>`}
-        <button class="tbtn" id="thide">${S.hideTimer ? 'Show' : 'Hide'}</button></div>
+        ${S.expired
+          ? `<div class="timer low" id="clock">00:00</div><div class="timerbar"></div>`
+          : `${S.hideTimer ? '' : `<div class="timer" id="clock">--:--</div><div class="timerbar"></div>`}
+             <button class="tbtn" id="thide">${S.hideTimer ? 'Show' : 'Hide'}</button>`}
+      </div>
       <div class="hright"><button class="tool" id="quit"><span class="ic">✕</span>Exit</button></div>
     </header>
     <main><div class="pane solo">
-      <h1 style="text-align:center">Check Your Work</h1>
-      <p class="sub" style="text-align:center">On test day you can't return to this module
-        once you move on.</p>
+      <h1 style="text-align:center">${S.expired ? 'Time is up' : 'Check Your Work'}</h1>
+      ${S.expired
+        ? `<div class="guard off" style="max-width:520px;margin:0 auto 26px">
+             <p class="danger" style="margin:0">The clock ran out on this module, so it's
+             closed — same as test day. Your answers are saved; anything left blank stays
+             blank.</p></div>`
+        : `<p class="sub" style="text-align:center">On test day you can't return to this
+             module once you move on.</p>`}
       <div class="legend"><i>⬜ unanswered</i><i>🟦 answered</i><i>⚑ for review</i></div>
       <div class="grid" style="max-width:520px;margin:0 auto">${m.qs.map((q, i) => {
         const a = S.resp[S.stage][i]; const done = a !== null && a !== '';
@@ -1147,19 +1165,24 @@ function renderReview() {
     <footer>
       <div class="who">Practice</div><div></div>
       <div class="footright">
-        <button class="navbtn ghost" id="back">Back to questions</button>
+        ${S.expired ? '' : `<button class="navbtn ghost" id="back">Back to questions</button>`}
         <button class="navbtn" id="submit">${last ? 'Finish and score' : 'Next module'}</button>
       </div>
     </footer>`;
-  $('#thide').onclick = () => { S.hideTimer = !S.hideTimer; renderReview(); };
+  const thide = $('#thide');
+  if (thide) thide.onclick = () => { S.hideTimer = !S.hideTimer; renderReview(); };
   $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { S = null; render(); } };
-  $('#back').onclick = () => { S.view = 'q'; render(); };
+  const back = $('#back');
+  if (back) back.onclick = () => { S.view = 'q'; render(); };
   $('#submit').onclick = () => {
     const un = S.resp[S.stage].filter(a => a === null || a === '').length;
-    if (un && !confirm(un + ' question(s) unanswered. Move on anyway?')) return;
+    // Once the clock has gone there is nothing to reconsider, so don't nag.
+    if (un && !S.expired && !confirm(un + ' question(s) unanswered. Move on anyway?')) return;
     advance();
   };
+  // The grid stops being a way back into a module whose time has expired.
   app.querySelectorAll('.gcell').forEach(c => c.onclick = () => {
+    if (S.expired) return;
     S.idx = +c.dataset.i; S.view = 'q'; render();
   });
   startTimer();
