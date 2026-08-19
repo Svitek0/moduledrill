@@ -1,4 +1,4 @@
-# SAT module simulator
+# ModuleDrill
 
 > **Disclosure:** this is not an original idea — it's a practice interface over College Board's
 > own published question bank — and most of the code was written with Claude Code. I designed
@@ -6,7 +6,7 @@
 > Not affiliated with, endorsed by, or connected to College Board.
 
 Timed digital-SAT practice modules built on the **SAT Suite Educator Question Bank** —
-3,255 official questions with College Board's own explanations, laid out and timed the way
+over 3,300 official questions with College Board's own explanations, laid out and timed the way
 Bluebook does it.
 
 I built this because I was practising in sets of ten questions and tracking my mistakes in a
@@ -33,12 +33,12 @@ this is a **client, not a mirror** — it never stores or redistributes their co
 
 ## Exclude active questions ← the important one
 
-College Board flags **2,022 of the 3,255** questions as *active* — still in use on test forms,
+College Board flags **roughly two thirds** of the questions as *active* — still in use on test forms,
 and therefore the ones that can spoil a practice test you haven't taken yet. Their own bank UI
 has an "Exclude Active Questions" checkbox for exactly this reason.
 
-This app has the same switch, and it is **on by default.** With it on you practise from the
-1,233 retired questions (746 R&W, 487 Math) — roughly 27 R&W modules and 22 Math modules
+This app has the same switch, and it is **on by default.** With it on you practise only from
+retired questions — comfortably more than 20 modules of each section
 before anything repeats. The flags are re-fetched weekly, because College Board rotates which
 items are active and a frozen copy quietly stops protecting you.
 
@@ -51,7 +51,9 @@ Module 1 + 2, at real timing (32 / 32 / 35 / 35 minutes).
 
 **Single module** — one module on its own, correct length and clock.
 
-**Custom drill** — pick section, domains, difficulty, question count and time limit.
+**Custom drill** — pick section, domains, individual skills, difficulty, question count and
+time limit. Skill counts are shown per chip, so you can see before starting whether a narrow
+skill has enough retired questions to fill the drill.
 
 Modules follow the real blueprint rather than drawing at random:
 

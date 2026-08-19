@@ -189,6 +189,15 @@
   .chip{border:1.5px solid var(--line);border-radius:16px;padding:5px 13px;font-size:13.5px;
     cursor:pointer;background:#fff;user-select:none}
   .chip.on{background:var(--fg);color:#fff;border-color:var(--fg)}
+  .chip b{font-weight:600;opacity:.55;margin-left:3px;font-size:12px}
+  .chip.thin b{color:var(--warn);opacity:.9}
+  .chip.on.thin b{color:#ffb4ae}
+  .skillgroup{margin-bottom:14px}
+  .skillgroup:last-child{margin-bottom:0}
+  .skillgroup h4{margin:0 0 7px;font-size:12px;text-transform:uppercase;
+    letter-spacing:.05em;color:var(--muted);font-weight:700}
+  .hint{margin:0 0 11px;font-size:13px;color:var(--muted)}
+  #poolsize.short{color:var(--warn);font-weight:600}
   .row{display:flex;gap:22px;flex-wrap:wrap;align-items:center;font-size:14px}
   .row label{display:flex;gap:7px;align-items:center}
   input[type=number]{width:74px;padding:5px 7px;border:1.5px solid var(--line);border-radius:5px;font:inherit}
@@ -616,8 +625,35 @@ function buildModule(sec, mix) {
   return out;
 }
 
-function buildCustom(sec, doms, diffs, n) {
-  const p = pool(sec).filter(q => doms.includes(q.dom) && diffs.includes(q.diff));
+/* Skill names are matched lowercased: College Board ships both
+   "Cross-Text Connections" and "Cross-text Connections", and treating them as
+   two different skills would quietly drop questions from the pool. */
+const skillKey = q => (q.skill || '').trim().toLowerCase();
+
+/** Skills present in a section's usable pool, grouped by domain, with counts. */
+function skillsByDomain(sec, doms) {
+  const out = {};
+  for (const q of pool(sec)) {
+    if (!doms.includes(q.dom)) continue;
+    const k = skillKey(q);
+    ((out[q.dom] ||= {})[k] ||= { label: (q.skill || '').trim(), n: 0 }).n++;
+  }
+  // most plentiful first, so the practical choices lead
+  for (const dom in out) {
+    out[dom] = Object.entries(out[dom]).sort((a, b) => b[1].n - a[1].n);
+  }
+  return out;
+}
+
+/** skills empty = no skill filter (i.e. every skill in the chosen domains). */
+function customPool(sec, doms, diffs, skills) {
+  return pool(sec).filter(q =>
+    doms.includes(q.dom) && diffs.includes(q.diff) &&
+    (!skills.length || skills.includes(skillKey(q))));
+}
+
+function buildCustom(sec, doms, diffs, n, skills = []) {
+  const p = customPool(sec, doms, diffs, skills);
   const mix = {};
   for (const d of ['E', 'M', 'H']) mix[d] = diffs.includes(d) ? 1 / diffs.length : 0;
   const out = draw(p, Math.min(n, p.length), mix);
@@ -848,6 +884,10 @@ function renderMenu() {
         </div>
       </fieldset>
       <fieldset><legend>Domains</legend><div class="chips" id="domchips"></div></fieldset>
+      <fieldset><legend>Skills</legend>
+        <p class="hint">Leave all unselected to include every skill in the domains above.</p>
+        <div id="skillchips"></div>
+      </fieldset>
       <fieldset><legend>Difficulty</legend>
         <div class="chips" id="diffchips">
           <span class="chip on" data-d="E">Easy</span>
@@ -924,35 +964,75 @@ function renderMenu() {
 
   // custom-drill wiring
   const chips = $('#domchips');
+  const curSec = () => app.querySelector('input[name=sec]:checked').value;
+  const picked = sel => [...app.querySelectorAll(sel + ' .chip.on')];
+  const pickedDoms = () => picked('#domchips').map(c => c.dataset.dom);
+  const pickedDiffs = () => picked('#diffchips').map(c => c.dataset.d);
+  const pickedSkills = () => picked('#skillchips').map(c => c.dataset.skill);
+
   const paintDoms = () => {
-    const sec = app.querySelector('input[name=sec]:checked').value;
-    chips.innerHTML = SPEC[sec].order.map(d =>
+    chips.innerHTML = SPEC[curSec()].order.map(d =>
       `<span class="chip on" data-dom="${d}">${DOMNAME[d]}</span>`).join('');
-    chips.querySelectorAll('.chip').forEach(c => c.onclick = () => { c.classList.toggle('on'); poolInfo(); });
+    chips.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+      c.classList.toggle('on'); paintSkills();       // skills follow the domains
+    });
+    paintSkills();
+  };
+
+  /** Only show skills for the domains actually selected — 19 maths skills at
+      once is unusable, and skills from an unselected domain would do nothing. */
+  const paintSkills = () => {
+    const sec = curSec(), doms = pickedDoms();
+    const keep = new Set(pickedSkills());            // survive a repaint
+    const groups = skillsByDomain(sec, doms);
+    const box = $('#skillchips');
+    box.innerHTML = doms.length
+      ? SPEC[sec].order.filter(d => groups[d]).map(d => `
+          <div class="skillgroup">
+            <h4>${DOMNAME[d]}</h4>
+            <div class="chips">${groups[d].map(([k, v]) => `
+              <span class="chip ${keep.has(k) ? 'on' : ''} ${v.n < 20 ? 'thin' : ''}"
+                    data-skill="${k}" title="${v.n} question${v.n === 1 ? '' : 's'} available"
+              >${v.label} <b>${v.n}</b></span>`).join('')}</div>
+          </div>`).join('')
+      : `<p class="hint">Select a domain first.</p>`;
+    box.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+      c.classList.toggle('on'); poolInfo();
+    });
     poolInfo();
   };
-  const picked = sel => [...app.querySelectorAll(sel + ' .chip.on')];
+
   const poolInfo = () => {
-    const sec = app.querySelector('input[name=sec]:checked').value;
-    const doms = picked('#domchips').map(c => c.dataset.dom);
-    const diffs = picked('#diffchips').map(c => c.dataset.d);
-    const n = pool(sec).filter(q => doms.includes(q.dom) && diffs.includes(q.diff)).length;
-    $('#poolsize').textContent = n.toLocaleString() + ' questions match'
-      + (noActive ? ' (active excluded)' : '');
+    const n = customPool(curSec(), pickedDoms(), pickedDiffs(), pickedSkills()).length;
+    const want = +$('#dn').value || 0;
+    const el = $('#poolsize');
+    el.classList.toggle('short', n < want);
+    el.innerHTML = n
+      ? `${n.toLocaleString()} question${n === 1 ? '' : 's'} match${noActive ? ' (active excluded)' : ''}`
+        + (n < want ? ` — not enough for ${want}, you'll get ${n}` : '')
+      : `Nothing matches this combination`;
   };
+
   app.querySelectorAll('input[name=sec]').forEach(r => r.onchange = paintDoms);
-  $('#diffchips').querySelectorAll('.chip').forEach(c => c.onclick = () => { c.classList.toggle('on'); poolInfo(); });
+  $('#diffchips').querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    c.classList.toggle('on'); poolInfo();
+  });
+  $('#dn').oninput = poolInfo;
   paintDoms();
 
   $('#drill').onsubmit = e => {
     e.preventDefault();
-    const sec = app.querySelector('input[name=sec]:checked').value;
-    const doms = picked('#domchips').map(c => c.dataset.dom);
-    const diffs = picked('#diffchips').map(c => c.dataset.d);
+    const sec = curSec(), doms = pickedDoms(), diffs = pickedDiffs(), skills = pickedSkills();
     if (!doms.length || !diffs.length) return alert('Pick at least one domain and one difficulty.');
-    const qs = buildCustom(sec, doms, diffs, +$('#dn').value);
+    const qs = buildCustom(sec, doms, diffs, +$('#dn').value, skills);
     if (!qs.length) return alert('No questions match that filter.');
-    startSession([{ sec, kind: 'drill', label: 'Custom drill — ' + SPEC[sec].name, qs, mins: +$('#dm').value }]);
+    // Name the drill after the skill when it's a single-skill session — that's
+    // the whole point of picking one, and it shows up in the history list.
+    const only = skills.length === 1
+      ? (customPool(sec, doms, diffs, skills)[0]?.skill || '').trim()   // skill_desc ships padded
+      : null;
+    const label = 'Custom drill — ' + (only || (skills.length ? skills.length + ' skills' : SPEC[sec].name));
+    startSession([{ sec, kind: 'drill', label, qs, mins: +$('#dm').value }]);
   };
 }
 
