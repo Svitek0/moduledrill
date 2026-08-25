@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"/Users/martinsvitek/Projekty/Portfolio/Portfoilo/images/rocketsim\" && ls -la *)"
+    ]
+  }
+}

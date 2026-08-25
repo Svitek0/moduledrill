@@ -183,6 +183,9 @@
   .guard em{display:block;font-style:normal;font-size:13.5px;color:var(--muted);
     margin-top:3px;line-height:1.5}
   .guard .danger{margin:10px 0 0 28px;font-size:13.5px;color:var(--warn);font-weight:600}
+  .card.mistakes{border-color:var(--mark)}
+  .card.mistakes:hover{border-color:var(--mark);box-shadow:0 3px 12px rgba(200,80,10,.15)}
+  .card.mistakes b::before{content:"⚑ ";color:var(--mark)}
   fieldset{border:1.5px solid var(--line);border-radius:10px;padding:14px 17px;margin:0 0 15px}
   legend{font-weight:700;font-size:14px;padding:0 7px}
   .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -559,6 +562,79 @@ const LS = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('satsim.' + k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('satsim.' + k, JSON.stringify(v)); } catch {} },
 };
+
+/* --------------------------------------------------------------------------
+   Mistake bank — the questions you got wrong and haven't since got right.
+
+   Deliberately a SET of question ids, not a log of attempts. It stores a
+   pointer into the index (36-char ext) and never any question content, entries
+   are deduplicated, and a question leaves the moment you answer it correctly
+   anywhere. That bounds it by the size of the pool rather than by how much you
+   practise: ~1,300 entries at ~56 bytes is under 80 KB even in the worst case.
+
+   Stored under its own key. Nothing here reads or writes satsim.seen or
+   satsim.history, so a fault in this code cannot corrupt what already exists.
+   -------------------------------------------------------------------------- */
+const MISS_SCHEMA = 1;
+const MISS_CAP = 3000;          // far above the pool; a guard, not a limit
+
+const Bank = {
+  /** Always returns a usable object, whatever is in storage. */
+  load() {
+    const raw = LS.get('missed', null);
+    if (!raw || raw.v !== MISS_SCHEMA || typeof raw.m !== 'object' || raw.m === null) {
+      return { v: MISS_SCHEMA, m: {} };     // absent, corrupt or older schema
+    }
+    return raw;
+  },
+  save(bank) {
+    const keys = Object.keys(bank.m);
+    if (keys.length > MISS_CAP) {           // evict oldest by last-seen date
+      keys.sort((a, b) => (bank.m[a][2] || 0) - (bank.m[b][2] || 0))
+          .slice(0, keys.length - MISS_CAP)
+          .forEach(k => delete bank.m[k]);
+    }
+    LS.set('missed', bank);
+  },
+  /** entry shape: ext -> [section, timesMissed, lastMissedAt] */
+  applyResults(flat) {
+    const bank = this.load();
+    let added = 0, cleared = 0;
+    for (const f of flat) {
+      const ext = f.q.ext;
+      if (!ext) continue;
+      if (f.ok) {
+        if (bank.m[ext]) { delete bank.m[ext]; cleared++; }
+      } else {
+        const prev = bank.m[ext];
+        bank.m[ext] = [f.sec === 'math' ? 1 : 0, (prev ? prev[1] : 0) + 1, Date.now()];
+        if (!prev) added++;
+      }
+    }
+    this.save(bank);
+    return { added, cleared, total: Object.keys(bank.m).length };
+  },
+  /** Index entries for everything in the bank, newest miss first. */
+  entries() {
+    const bank = this.load(), byExt = new Map();
+    for (const sec of ['rw', 'math']) for (const q of INDEX[sec]) byExt.set(q.ext, q);
+    const out = [];
+    let stale = false;
+    for (const [ext, rec] of Object.entries(bank.m)) {
+      const q = byExt.get(ext);
+      if (!q) { stale = true; continue; }   // question no longer in the bank
+      out.push({ q, times: rec[1] || 1, at: rec[2] || 0 });
+    }
+    if (stale) {                            // prune ids the bank has dropped
+      for (const ext of Object.keys(bank.m)) if (!byExt.has(ext)) delete bank.m[ext];
+      this.save(bank);
+    }
+    out.sort((a, b) => b.at - a.at);
+    return out;
+  },
+  count() { return this.entries().length; },
+  clear() { LS.set('missed', { v: MISS_SCHEMA, m: {} }); },
+};
 let seen = new Set(LS.get('seen', []));
 const markSeen = qs => { qs.forEach(q => seen.add(q.id)); LS.set('seen', [...seen]); };
 
@@ -847,6 +923,9 @@ function renderMenu() {
   const total = INDEX.rw.length + INDEX.math.length;
   const active = INDEX.rw.filter(q => q.live).length + INDEX.math.filter(q => q.live).length;
   const usable = poolCount('rw') + poolCount('math');
+  // never let a bank fault stop the menu from rendering
+  let missCount = 0;
+  try { missCount = Bank.count(); } catch (e) { missCount = 0; }
   // safe counts are what's left after exclusion, regardless of the current toggle
   const safeRW = INDEX.rw.filter(q => !q.live).length;
   const safeMa = INDEX.math.filter(q => !q.live).length;
@@ -884,6 +963,16 @@ function renderMenu() {
       <button class="card" data-go="sec:rw"><b>Reading &amp; Writing section</b><span>Two 27-question modules · 64 min</span></button>
       <button class="card" data-go="sec:math"><b>Math section</b><span>Two 22-question modules · 70 min</span></button>
     </div>
+
+    ${missCount ? `
+    <h2>Your mistakes</h2>
+    <div class="cards">
+      <button class="card mistakes" data-go="miss:${Math.min(missCount, 20)}">
+        <b>Practise what you got wrong</b>
+        <span>${missCount} question${missCount === 1 ? '' : 's'} you've missed and not yet
+        got right${missCount > 20 ? ' — the 20 you miss most often come first' : ''}.
+        Answer one correctly, anywhere, and it leaves this list.</span></button>
+    </div>` : ''}
 
     <h2>Single module</h2>
     <div class="cards">
@@ -1054,8 +1143,27 @@ function renderMenu() {
   };
 }
 
+/** A drill over your outstanding mistakes, hardest-hit first.
+    These are questions you have already been shown, so re-showing them creates
+    no new spoiler risk and the exclude-active setting is not applied here. */
+function buildMistakeDrill(n) {
+  const picked = Bank.entries()
+    .sort((a, b) => b.times - a.times || b.at - a.at)
+    .slice(0, n)
+    .map(e => e.q);
+  markSeen(picked);
+  return picked;
+}
+
 function go(cmd) {
   const [kind, a, b] = cmd.split(':');
+  if (kind === 'miss') {
+    const qs = buildMistakeDrill(+a || 20);
+    if (!qs.length) return;
+    return startSession([{ sec: qs[0].dom in DOMNAME && ['H','P','Q','S'].includes(qs[0].dom) ? 'math' : 'rw',
+                           kind: 'drill', mixed: true,
+                           label: 'Your mistakes', qs, mins: Math.max(5, Math.round(qs.length * 1.4)) }]);
+  }
   if (kind === 'mod') {
     const label = SPEC[a].name + ' — Module ' + (b === 'm1' ? '1' : '2');
     return startSession([{ sec: a, kind: 'mod', label, qs: buildModule(a, MIX[b]), mins: SPEC[a].mins }]);
@@ -1302,6 +1410,8 @@ function finish() {
     correct, total: flat.length,
   });
   LS.set('history', hist.slice(0, 40));
+  // Bank update is isolated: if anything here throws, you still get your results.
+  try { S.bank = Bank.applyResults(flat); } catch (e) { S.bank = null; }
   renderResults();
 }
 
@@ -1335,6 +1445,12 @@ function renderResults() {
     <div class="note">No scaled score. This pool isn't adaptive and isn't equated, so a
       200–800 number here would be fiction. Read the domain table instead — that's the part
       that actually tells you where to spend the next two weeks.</div>
+
+    ${S.bank ? `<div class="guard on" style="margin-bottom:26px">
+      <p style="margin:0"><b>Mistake bank:</b>
+        ${S.bank.added ? `${S.bank.added} new question${S.bank.added === 1 ? '' : 's'} added` : 'nothing new added'}${S.bank.cleared ? `, ${S.bank.cleared} cleared by getting ${S.bank.cleared === 1 ? 'it' : 'them'} right` : ''}.
+        ${S.bank.total ? `${S.bank.total} outstanding — practise ${S.bank.total === 1 ? 'it' : 'them'} from the menu.` : 'Nothing outstanding. Everything you have missed, you have since got right.'}</p>
+    </div>` : ''}
 
     <h2>By domain</h2>${tbl(group(f => f.q.domName), 'Domain')}
     <h2>By skill</h2>${tbl(group(f => f.q.skill), 'Skill')}
