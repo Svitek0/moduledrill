@@ -244,6 +244,24 @@
     .pane{padding:18px 16px}
     .opts.abcmode{padding-right:38px}
   }
+
+  /* Phone widths: the math header carries three tools where Reading and Writing
+     carries one, and at 375px that pushed the page 26px wider than the screen —
+     every math question scrolled sideways. Let the columns collapse and shrink
+     the tools instead of letting the row set a minimum width. */
+  @media (max-width:430px){
+    header{grid-template-columns:auto 1fr auto;gap:6px;padding:8px 10px 4px}
+    .hleft{font-size:13px;min-width:0}
+    .hleft small{display:none}
+    .hright{gap:10px;min-width:0}
+    .tool{font-size:10px;padding:2px}
+    .tool span.ic{font-size:15px}
+    .timer{font-size:19px}
+    .qhead .acts{gap:8px;padding:5px 8px}
+    footer{padding:9px 12px;gap:8px}
+    .navbtn{padding:8px 15px;font-size:13px}
+    .qpick{padding:7px 10px;font-size:13px}
+  }
 </style>
 </head>
 <body>
