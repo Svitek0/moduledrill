@@ -58,7 +58,7 @@
   .tool span.ic{font-size:18px;line-height:1}
 
   /* ---------- question area ---------- */
-  main{flex:1 1 auto;overflow:hidden;display:flex}
+  main{flex:1 1 auto;overflow:hidden;display:flex;transition:padding .18s ease}
   .split{display:flex;width:100%}
   /* position:relative makes these scroll containers the containing block for
      absolutely positioned descendants. Without it, the .sr-only spans inside
@@ -1292,6 +1292,8 @@ function renderQuestion() {
   if (isMath) {
     $('#calc').onclick = () => Calc.toggle();
     $('#ref').onclick = showReference;
+    // <main> is rebuilt on every question, so the reserved space must be re-set
+    Calc.reflow();
   } else {
     // Reading and Writing has no calculator, so don't leave one floating there.
     Calc.close();
@@ -1550,14 +1552,37 @@ const Calc = {
   el: null,
   isOpen() { return !!document.querySelector('.calcpanel'); },
   toggle() { this.isOpen() ? this.close() : this.open(); },
-  close() { document.querySelector('.calcpanel')?.remove(); },
+  close() { document.querySelector('.calcpanel')?.remove(); this.reflow(); },
 
-  /** Remembered geometry, clamped so it can never open off-screen. */
+  /* Bluebook doesn't let the calculator sit on top of the question — the
+     content slides across to make room. Because the question pane is
+     `max-width:820px; margin:0 auto` inside a flex <main>, padding one side of
+     <main> is enough: the pane re-centres itself in whatever room is left.
+
+     Space is reserved on whichever side the panel actually occupies, so this
+     still behaves sensibly once you drag it, and capped at 45% of the width so
+     an over-sized panel can't squeeze the question into a column. */
+  reflow() {
+    const main = document.querySelector('main');
+    if (!main) return;
+    const p = document.querySelector('.calcpanel');
+    main.style.paddingLeft = main.style.paddingRight = '';
+    if (!p || innerWidth <= 760) return;          // phone: panel is full-screen
+    const b = p.getBoundingClientRect();
+    const room = Math.min(innerWidth * 0.45, Math.max(0, b.width) + 24);
+    // whichever edge the panel is closer to is the side that needs clearing
+    if (b.left + b.width / 2 < innerWidth / 2) main.style.paddingLeft = room + 'px';
+    else main.style.paddingRight = room + 'px';
+  },
+
+  /** Remembered geometry, clamped so it can never open off-screen.
+      Defaults to the left, where Bluebook puts it, with the question pushed
+      right to make room. */
   geometry() {
     const d = LS.get('calc', null) || {};
     const w = Math.min(Math.max(d.w || 520, 280), Math.max(320, innerWidth - 20));
     const h = Math.min(Math.max(d.h || 560, 220), Math.max(240, innerHeight - 20));
-    const x = Math.min(Math.max(d.x ?? (innerWidth - w - 32), 0), Math.max(0, innerWidth - w));
+    const x = Math.min(Math.max(d.x ?? 16, 0), Math.max(0, innerWidth - w));
     const y = Math.min(Math.max(d.y ?? 90, 0), Math.max(0, innerHeight - h));
     return { x, y, w, h };
   },
@@ -1586,6 +1611,7 @@ const Calc = {
     p.querySelector('.x').onclick = () => this.close();
     this.makeDraggable(p);
     this.makeResizable(p);
+    this.reflow();
   },
 
   loadFrame(body) {
@@ -1631,6 +1657,7 @@ const Calc = {
       window.removeEventListener('pointercancel', up);
       const b = p.getBoundingClientRect();
       this.remember({ x: b.left, y: b.top, w: b.width, h: b.height });
+      this.reflow();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1686,6 +1713,10 @@ function showReference() {
 }
 
 // ---- keyboard --------------------------------------------------------------
+// Rotating a tablet or resizing the window changes how much room there is, and
+// crossing the phone breakpoint switches the panel to full-screen.
+window.addEventListener('resize', () => { try { Calc.reflow(); } catch (e) {} });
+
 document.addEventListener('keydown', e => {
   if (!S || S.view !== 'q') return;
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') $('#next').click(); return; }
