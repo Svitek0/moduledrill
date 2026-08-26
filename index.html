@@ -134,6 +134,37 @@
     font-size:14px;font-weight:600;cursor:pointer}
 
   /* ---------- nav popup ---------- */
+  /* ---------- floating calculator ---------- */
+  .calcpanel{position:fixed;z-index:55;background:#fff;border:1px solid var(--line);
+    border-radius:10px;box-shadow:0 10px 34px rgba(0,0,0,.26);display:flex;
+    flex-direction:column;overflow:hidden;min-width:280px;min-height:220px}
+  .calcbar{display:flex;align-items:center;gap:10px;padding:7px 8px 7px 12px;
+    background:var(--band);border-bottom:1px solid var(--line2);cursor:move;
+    user-select:none;flex:0 0 auto}
+  .calcbar b{font-size:13px;font-weight:650;margin-right:auto}
+  .calcbar a,.calcbar button{background:none;border:none;cursor:pointer;font-size:12px;
+    color:var(--muted);text-decoration:none;padding:3px 6px;border-radius:5px}
+  .calcbar a:hover,.calcbar button:hover{background:#e6e9ec;color:var(--fg)}
+  .calcbar .x{font-size:16px;line-height:1}
+  .calcbody{flex:1;position:relative;background:#fff}
+  .calcbody iframe{width:100%;height:100%;border:0;display:block}
+  /* while dragging or resizing the iframe must not swallow the pointer */
+  .calcpanel.busy iframe{pointer-events:none}
+  .calcgrip{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;
+    background:linear-gradient(135deg,transparent 50%,var(--line) 50%,var(--line) 60%,
+      transparent 60%,transparent 72%,var(--line) 72%,var(--line) 82%,transparent 82%)}
+  .calcmsg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;padding:26px;gap:10px;font-size:14px;
+    color:var(--muted);line-height:1.55}
+  .calcmsg b{color:var(--fg);font-size:15px}
+  @media (max-width:760px){
+    /* no room to float a calculator over a question on a phone */
+    .calcpanel{inset:0 !important;width:auto !important;height:auto !important;
+      border-radius:0;border:none}
+    .calcbar{cursor:default}
+    .calcgrip{display:none}
+  }
+
   .navpop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;
     align-items:center;justify-content:center;z-index:40}
   .navcard{background:#fff;border-radius:10px;padding:22px 26px;width:min(560px,92vw);
@@ -918,6 +949,7 @@ function render() {
 
 // ---- menu ------------------------------------------------------------------
 function renderMenu() {
+  Calc.close();          // no module open, no calculator
   clearInterval(tick);
   const hist = LS.get('history', []);
   const total = INDEX.rw.length + INDEX.math.length;
@@ -1030,7 +1062,8 @@ function renderMenu() {
       Questions are fetched from College Board as you need them and kept in this browser,
       so nothing is downloaded twice. <b id="cachen">…</b> cached so far.
       Caching every question lets the app work with no connection at all — useful if you
-      want it dependable on exam week.
+      want it dependable on exam week. The calculator is the one exception: it's Desmos's
+      site, so it still needs a connection.
     </p>
     <div class="row">
       <button class="chip" id="cacheall">Cache everything for offline</button>
@@ -1257,11 +1290,11 @@ function renderQuestion() {
   };
   $('#qpick').onclick = openNav;
   if (isMath) {
-    // The College Board build of Desmos — the same one embedded in Bluebook.
-    // (/testing/digital-sat is just Desmos's landing page and asks for a US state.)
-    $('#calc').onclick = () =>
-      window.open('https://www.desmos.com/testing/collegeboard/graphing', '_blank');
+    $('#calc').onclick = () => Calc.toggle();
     $('#ref').onclick = showReference;
+  } else {
+    // Reading and Writing has no calculator, so don't leave one floating there.
+    Calc.close();
   }
 
   if (q.type === 'spr') {
@@ -1416,6 +1449,7 @@ function finish() {
 }
 
 function renderResults() {
+  Calc.close();
   const flat = S.flat;
   const correct = flat.filter(f => f.ok).length;
   const blank = flat.filter(f => f.resp === null || f.resp === '').length;
@@ -1495,6 +1529,140 @@ function renderResults() {
 }
 
 // ---- math reference sheet --------------------------------------------------
+/* --------------------------------------------------------------------------
+   Floating calculator.
+
+   Bluebook gives you a Desmos panel you can drag around over the question, and
+   switching browser tabs mid-module breaks the rehearsal. This embeds College
+   Board's own Desmos build in a panel that behaves the same way.
+
+   It lives on <body>, not inside #app, so it survives the re-render that
+   happens on every question change. Nothing is fetched until you first open it,
+   so Reading and Writing sessions never pay for it.
+
+   The one thing it cannot do is work offline. Everything else in this app runs
+   from cache with no connection; Desmos is somebody else's site. When there is
+   no connection the panel says so plainly rather than showing an empty box.
+   -------------------------------------------------------------------------- */
+const CALC_URL = 'https://www.desmos.com/testing/collegeboard/graphing';
+
+const Calc = {
+  el: null,
+  isOpen() { return !!document.querySelector('.calcpanel'); },
+  toggle() { this.isOpen() ? this.close() : this.open(); },
+  close() { document.querySelector('.calcpanel')?.remove(); },
+
+  /** Remembered geometry, clamped so it can never open off-screen. */
+  geometry() {
+    const d = LS.get('calc', null) || {};
+    const w = Math.min(Math.max(d.w || 520, 280), Math.max(320, innerWidth - 20));
+    const h = Math.min(Math.max(d.h || 560, 220), Math.max(240, innerHeight - 20));
+    const x = Math.min(Math.max(d.x ?? (innerWidth - w - 32), 0), Math.max(0, innerWidth - w));
+    const y = Math.min(Math.max(d.y ?? 90, 0), Math.max(0, innerHeight - h));
+    return { x, y, w, h };
+  },
+  remember(g) { LS.set('calc', g); },
+
+  open() {
+    if (this.isOpen()) return;
+    const g = this.geometry();
+    const p = document.createElement('div');
+    p.className = 'calcpanel';
+    p.style.cssText = `left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px`;
+    p.innerHTML = `
+      <div class="calcbar">
+        <b>Calculator</b>
+        <a href="${CALC_URL}" target="_blank" rel="noopener">Open in a tab ↗</a>
+        <button class="x" title="Close">✕</button>
+      </div>
+      <div class="calcbody"></div>
+      <div class="calcgrip" title="Drag to resize"></div>`;
+    document.body.appendChild(p);
+
+    const body = p.querySelector('.calcbody');
+    if (!navigator.onLine) this.offlineMessage(body);
+    else this.loadFrame(body);
+
+    p.querySelector('.x').onclick = () => this.close();
+    this.makeDraggable(p);
+    this.makeResizable(p);
+  },
+
+  loadFrame(body) {
+    body.innerHTML = `<div class="calcmsg"><b>Loading Desmos…</b></div>`;
+    const f = document.createElement('iframe');
+    f.title = 'Desmos graphing calculator, College Board version';
+    f.src = CALC_URL;
+    let done = false;
+    // A cross-origin frame won't tell us why it failed, so treat "never loaded"
+    // as failure and say something useful instead of leaving a blank rectangle.
+    const fail = setTimeout(() => { if (!done) this.offlineMessage(body, true); }, 12000);
+    f.onload = () => { done = true; clearTimeout(fail);
+                       body.querySelector('.calcmsg')?.remove(); };
+    body.appendChild(f);
+  },
+
+  offlineMessage(body, timedOut) {
+    body.innerHTML = `
+      <div class="calcmsg">
+        <b>The calculator needs a connection</b>
+        <div>Everything else here works offline — your cached questions, the timer,
+          your results. Desmos is hosted by someone else, so it can't be cached
+          along with them.${timedOut ? ' It didn\'t load in time just now.' : ''}</div>
+        <div>Use a handheld calculator for this module, or reopen this when you're
+          back online.</div>
+        <button class="navbtn ghost" style="margin-top:4px">Try again</button>
+      </div>`;
+    body.querySelector('button').onclick = () => {
+      navigator.onLine ? this.loadFrame(body) : this.offlineMessage(body);
+    };
+  },
+
+  /* Drag and resize both track on window rather than on the handle. A pointer
+     moving faster than the browser repaints will leave a 20px grip long before
+     the gesture ends; window listeners keep following it either way. */
+  gesture(p, onMove) {
+    p.classList.add('busy');
+    const move = ev => onMove(ev);
+    const up = () => {
+      p.classList.remove('busy');
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      const b = p.getBoundingClientRect();
+      this.remember({ x: b.left, y: b.top, w: b.width, h: b.height });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  },
+
+  makeDraggable(p) {
+    p.querySelector('.calcbar').addEventListener('pointerdown', e => {
+      if (e.target.closest('a, button')) return;         // let the controls work
+      e.preventDefault();
+      const r = p.getBoundingClientRect();
+      const dx = e.clientX - r.left, dy = e.clientY - r.top;
+      this.gesture(p, ev => {
+        p.style.left = Math.min(Math.max(ev.clientX - dx, 0), innerWidth - r.width) + 'px';
+        p.style.top  = Math.min(Math.max(ev.clientY - dy, 0), innerHeight - r.height) + 'px';
+      });
+    });
+  },
+
+  makeResizable(p) {
+    p.querySelector('.calcgrip').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      const r = p.getBoundingClientRect();
+      const sx = e.clientX, sy = e.clientY;
+      this.gesture(p, ev => {
+        p.style.width  = Math.max(280, Math.min(r.width  + ev.clientX - sx, innerWidth  - r.left)) + 'px';
+        p.style.height = Math.max(220, Math.min(r.height + ev.clientY - sy, innerHeight - r.top))  + 'px';
+      });
+    });
+  },
+};
+
 function showReference() {
   const pop = document.createElement('div');
   pop.className = 'navpop';

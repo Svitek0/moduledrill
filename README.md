@@ -29,7 +29,9 @@ this is a **client, not a mirror** — it never stores or redistributes their co
   and Writing module, 98 for a whole test. Takes a second or two.
 - **After that:** everything is cached in IndexedDB, so a returning visit re-fetches nothing.
 - **Optional:** "Cache everything for offline" pulls the whole bank in about two minutes and
-  the app then works with no connection at all.
+  the app then works with no connection at all — questions, timer, results and all. The one
+  exception is the calculator, which is Desmos's site and can't be cached with everything
+  else; with no connection it says so rather than showing an empty panel.
 
 ## Exclude active questions ← the important one
 
@@ -73,7 +75,9 @@ Modules follow the real blueprint rather than drawing at random:
 - "Check Your Work" review page before you commit to a module
 - Grid-in entry with answer preview, accepting fractions or decimals — including a repeating
   value truncated *or* rounded to fill the field, which is the real rule
-- Math reference sheet; the Calculator button opens Desmos test mode
+- Math reference sheet, and College Board's own Desmos build in a draggable, resizable
+  panel over the question — no tab switching. It loads only when you first open it, and
+  remembers where you put it.
 - Keyboard: `A`–`D` to answer, `←`/`→` to move, `M` to mark
 
 ## Results
@@ -95,7 +99,9 @@ score. Read the domain table instead.
   flag, not a guarantee about any specific Bluebook form.
 - 459 items are skipped because they embed their math as images rather than text. Those come
   from the disclosed paper tests, so leaving them out is a second layer of spoiler protection.
-- No Desmos embedded, no annotation/highlighter tool.
+- No annotation/highlighter tool.
+- The embedded calculator is the one part that needs a connection, and it's a third-party
+  frame, so Desmos sees the visitor's IP like any embed would.
 - If College Board changes or closes the API, the app breaks. See below.
 
 ## Running it locally

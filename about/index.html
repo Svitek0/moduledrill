@@ -109,6 +109,11 @@
         banner to click through.</li>
     <li>The only measurement is Cloudflare Web Analytics, which is cookieless and counts
         page views and countries without identifying anyone.</li>
+    <li>One honest exception: the <strong>calculator</strong> is Desmos's own page shown
+        inside this one. When you open it, Desmos sees your IP address and can set its own
+        cookies in that panel, exactly as any embedded map or video would. It loads only if
+        you actually open it — if you never press Calculator, nothing is ever requested from
+        them. Nothing about your answers or your results is shared with anyone, ever.</li>
   </ul>
 
   <p>The practical consequence: if you clear your browser data, your history here is gone,
@@ -140,8 +145,11 @@
     <li><strong>Module 2 is an approximation.</strong> The real test picks your second module
         based on how you did on the first. Here it's a difficulty-weighted draw — score 60%
         or better and you get the harder set. It's labelled so you always know which you're on.</li>
-    <li><strong>No annotation or highlighter tool</strong>, and the calculator opens Desmos
-        in a new tab rather than being embedded.</li>
+    <li><strong>No annotation or highlighter tool.</strong></li>
+    <li><strong>The calculator needs a connection.</strong> Everything else here runs offline
+        once your questions are cached, but the calculator is Desmos's site shown inside this
+        one, so it can't be cached along with the rest. With no connection it tells you so
+        instead of showing an empty panel.</li>
     <li>A few hundred questions are skipped because they store their maths as images.</li>
     <li>If College Board changes or closes their question bank, this app stops working.</li>
   </ul>
