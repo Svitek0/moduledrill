@@ -214,6 +214,9 @@
   .guard em{display:block;font-style:normal;font-size:13.5px;color:var(--muted);
     margin-top:3px;line-height:1.5}
   .guard .danger{margin:10px 0 0 28px;font-size:13.5px;color:var(--warn);font-weight:600}
+  .card.resume{border-color:var(--blue);background:#f5f9ff}
+  .card.resume:hover{box-shadow:0 3px 12px rgba(13,90,193,.16)}
+  .card.resume b::before{content:"▸ ";color:var(--blue)}
   .card.mistakes{border-color:var(--mark)}
   .card.mistakes:hover{border-color:var(--mark);box-shadow:0 3px 12px rgba(200,80,10,.15)}
   .card.mistakes b::before{content:"⚑ ";color:var(--mark)}
@@ -817,11 +820,118 @@ function isCorrect(q, resp) {
       return Math.abs(trunc - v) < 1e-9 || Math.abs(round - v) < 1e-9;
     });
   }
+  // An un-hydrated question has no answer key. Scoring it as wrong is the safe
+  // reading, and it means a scoring pass can never throw and lose a session.
+  if (!Array.isArray(q.ans)) return false;
   return q.ans.includes(LETTERS[resp]);
 }
 
 // ---- session state ---------------------------------------------------------
 let S = null;
+
+/* --------------------------------------------------------------------------
+   Session resume.
+
+   A full test is over two hours. Closing the tab, a crash, or a laptop lid
+   used to throw all of it away without warning. This snapshots the session
+   after every change so it can be picked up again.
+
+   Two decisions worth stating:
+
+   - It stores question *ids*, never content. Bodies are already in IndexedDB
+     from when they were first fetched, so a resume rehydrates from cache.
+   - It stores time *remaining*, not a deadline. The clock therefore pauses
+     while you're away rather than running down in a closed tab. The resume
+     card says how long the gap was, so a paused clock is never a silent one.
+   -------------------------------------------------------------------------- */
+const RESUME_SCHEMA = 1;
+const RESUME_MAX_AGE = 7 * 24 * 3600 * 1000;      // don't offer week-old sessions
+
+const Resume = {
+  save() {
+    if (!S || S.view === 'results') return;
+    try {
+      LS.set('session', {
+        v: RESUME_SCHEMA,
+        at: Date.now(),
+        left: Math.max(0, S.endsAt - Date.now()),   // remaining, not a deadline
+        startedAt: S.startedAt,
+        stage: S.stage, idx: S.idx, view: S.view,
+        abc: S.abc, hideTimer: S.hideTimer, expired: !!S.expired,
+        resp: S.resp, marks: S.marks, strikes: S.strikes,
+        plan: S.plan.map(m => ({
+          sec: m.sec, kind: m.kind, label: m.label, mins: m.mins,
+          route: m.route, pending: !!m.pending,
+          qs: m.qs.map(q => q.ext),                 // ids only
+        })),
+      });
+    } catch (e) {}
+  },
+  clear() { try { localStorage.removeItem('satsim.session'); } catch (e) {} },
+
+  /** Readable summary for the menu card, or null if there's nothing usable. */
+  peek() {
+    const d = LS.get('session', null);
+    if (!d || d.v !== RESUME_SCHEMA || !Array.isArray(d.plan) || !d.plan.length) return null;
+    if (Date.now() - d.at > RESUME_MAX_AGE) return null;
+    const m = d.plan[d.stage] || d.plan[0];
+    const answered = (d.resp[d.stage] || []).filter(a => a !== null && a !== '').length;
+    return {
+      label: m.label || 'Session',
+      stage: d.stage + 1, stages: d.plan.filter(x => x.kind !== 'break').length,
+      idx: d.idx + 1, total: (m.qs || []).length,
+      answered, minsLeft: Math.round(d.left / 60000),
+      agoMins: Math.round((Date.now() - d.at) / 60000),
+      multiStage: d.plan.length > 1,
+    };
+  },
+
+  /** Rebuild a live session from the snapshot. Returns false if it can't. */
+  async restore() {
+    const d = LS.get('session', null);
+    if (!d || d.v !== RESUME_SCHEMA) return false;
+    const byExt = new Map();
+    for (const sec of ['rw', 'math']) for (const q of INDEX[sec]) byExt.set(q.ext, q);
+
+    const plan = [];
+    for (const m of d.plan) {
+      const qs = (m.qs || []).map(e => byExt.get(e)).filter(Boolean);
+      // a stage that lost questions can't be scored honestly; give up cleanly
+      if (m.kind !== 'break' && qs.length !== (m.qs || []).length) return false;
+      plan.push({ sec: m.sec, kind: m.kind, label: m.label, mins: m.mins,
+                  route: m.route, pending: m.pending, qs });
+    }
+    S = { plan, stage: d.stage, view: d.view, idx: d.idx,
+          resp: d.resp, marks: d.marks, strikes: d.strikes,
+          abc: d.abc, hideTimer: d.hideTimer, expired: d.expired,
+          endsAt: Date.now() + d.left, startedAt: d.startedAt || Date.now() };
+
+    // Every stage with questions has to be hydrated, not just the current one:
+    // finish() scores the whole plan, and the review list needs the content of
+    // stages you completed before the interruption. Hydrating only the current
+    // stage meant resuming a full test and then finishing it threw on the
+    // results screen — losing the very session this exists to protect.
+    const need = S.plan.filter(m => m.kind !== 'break' && m.qs.length);
+    try {
+      await withLoading('Restoring your session…', async p => {
+        let done = 0;
+        const total = need.reduce((n, m) => n + m.qs.length, 0);
+        for (const m of need) {
+          m.qs = await hydrate(m.qs, d => p(done + d, total));
+          done += m.qs.length;
+          m.hydrated = true;
+        }
+      });
+    } catch (e) { S = null; return false; }
+    render();
+    return true;
+  },
+};
+
+// A snapshot on the way out covers the cases that never reach a render:
+// closing the tab, the browser being killed, the phone going to sleep.
+addEventListener('pagehide', () => Resume.save());
+addEventListener('visibilitychange', () => { if (document.hidden) Resume.save(); });
 
 async function startSession(plan) {
   S = {
@@ -837,6 +947,7 @@ async function startSession(plan) {
     endsAt: 0,
     startedAt: Date.now(),
   };
+  Resume.clear();
   await beginStage();
 }
 
@@ -858,6 +969,7 @@ async function beginStage() {
   S.endsAt = Date.now() + m.mins * 60000;
   S.expired = false;                        // each stage gets its own clock
   render();
+  Resume.save();
 }
 
 async function advance() {
@@ -955,9 +1067,13 @@ function renderMenu() {
   const total = INDEX.rw.length + INDEX.math.length;
   const active = INDEX.rw.filter(q => q.live).length + INDEX.math.filter(q => q.live).length;
   const usable = poolCount('rw') + poolCount('math');
-  // never let a bank fault stop the menu from rendering
+  // never let a bank or snapshot fault stop the menu from rendering
   let missCount = 0;
   try { missCount = Bank.count(); } catch (e) { missCount = 0; }
+  let resume = null;
+  try { resume = Resume.peek(); } catch (e) { resume = null; }
+  const ago = m => m < 1 ? 'just now' : m < 60 ? m + ' min ago'
+             : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago';
   // safe counts are what's left after exclusion, regardless of the current toggle
   const safeRW = INDEX.rw.filter(q => !q.live).length;
   const safeMa = INDEX.math.filter(q => !q.live).length;
@@ -995,6 +1111,18 @@ function renderMenu() {
       <button class="card" data-go="sec:rw"><b>Reading &amp; Writing section</b><span>Two 27-question modules · 64 min</span></button>
       <button class="card" data-go="sec:math"><b>Math section</b><span>Two 22-question modules · 70 min</span></button>
     </div>
+
+    ${resume ? `
+    <h2>Unfinished session</h2>
+    <div class="cards">
+      <button class="card resume" id="resumecard">
+        <b>Resume ${resume.label}</b>
+        <span>Question ${resume.idx} of ${resume.total}${resume.multiStage ? `, part ${resume.stage} of ${resume.stages}` : ''} ·
+        ${resume.answered} answered · ${resume.minsLeft} min left on the clock.
+        Left ${ago(resume.agoMins)}; the timer was paused while you were away.</span></button>
+      <button class="card" id="discardcard"><b>Discard it</b>
+        <span>Throw the unfinished session away and start something new.</span></button>
+    </div>` : ''}
 
     ${missCount ? `
     <h2>Your mistakes</h2>
@@ -1098,6 +1226,20 @@ function renderMenu() {
   };
 
   app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  const rc = $('#resumecard');
+  if (rc) rc.onclick = async () => {
+    if (!await Resume.restore()) {
+      Resume.clear();
+      alert('That session could not be restored, so it has been cleared.');
+      renderMenu();
+    }
+  };
+  const dc = $('#discardcard');
+  if (dc) dc.onclick = () => {
+    if (confirm('Discard the unfinished session? This cannot be undone.')) {
+      Resume.clear(); renderMenu();
+    }
+  };
   $('#noactive').onchange = e => { noActive = e.target.checked; LS.set('noActive', noActive); renderMenu(); };
   $('#resetseen').onclick = () => { seen = new Set(); LS.set('seen', []); renderMenu(); };
   const rh = $('#resethist'); if (rh) rh.onclick = () => { LS.set('history', []); renderMenu(); };
@@ -1279,7 +1421,7 @@ function renderQuestion() {
 
   // ---- wiring
   $('#thide').onclick = () => { S.hideTimer = !S.hideTimer; render(); };
-  $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { S = null; render(); } };
+  $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { Resume.clear(); S = null; render(); } };
   $('#mark').onclick = () => { S.marks[S.stage][S.idx] = !marked; render(); };
   const abcBtn = $('#abc');
   if (abcBtn) abcBtn.onclick = () => { S.abc = !S.abc; render(); };
@@ -1304,6 +1446,8 @@ function renderQuestion() {
     inp.oninput = () => {
       S.resp[S.stage][S.idx] = inp.value;
       $('#sprprev').textContent = inp.value ? 'Answer preview: ' + inp.value : '';
+      clearTimeout(inp._save);              // typing shouldn't write on every key
+      inp._save = setTimeout(() => Resume.save(), 400);
     };
     inp.focus();
     inp.setSelectionRange(inp.value.length, inp.value.length);
@@ -1327,6 +1471,7 @@ function renderQuestion() {
     });
   }
   startTimer();
+  Resume.save();     // answers, marks, strikes and navigation all re-render
 }
 
 const optsHTML = (q, resp, struck) => `
@@ -1412,7 +1557,7 @@ function renderReview() {
     </footer>`;
   const thide = $('#thide');
   if (thide) thide.onclick = () => { S.hideTimer = !S.hideTimer; renderReview(); };
-  $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { S = null; render(); } };
+  $('#quit').onclick = () => { if (confirm('Exit and discard this session?')) { Resume.clear(); S = null; render(); } };
   const back = $('#back');
   if (back) back.onclick = () => { S.view = 'q'; render(); };
   $('#submit').onclick = () => {
@@ -1447,6 +1592,7 @@ function finish() {
   LS.set('history', hist.slice(0, 40));
   // Bank update is isolated: if anything here throws, you still get your results.
   try { S.bank = Bank.applyResults(flat); } catch (e) { S.bank = null; }
+  Resume.clear();                         // finished sessions aren't resumable
   renderResults();
 }
 
