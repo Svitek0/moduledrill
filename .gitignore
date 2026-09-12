@@ -18,3 +18,4 @@ __pycache__/
 
 # local screenshot staging, not part of the app
 _shots/
+.claude/

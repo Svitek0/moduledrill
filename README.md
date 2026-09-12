@@ -57,6 +57,11 @@ Module 1 + 2, at real timing (32 / 32 / 35 / 35 minutes).
 time limit. Skill counts are shown per chip, so you can see before starting whether a narrow
 skill has enough retired questions to fill the drill.
 
+**Your mistakes** — questions you got wrong, collected so you can drill them again. Answer one
+correctly anywhere and it leaves the list.
+
+**Vocabulary** — a three-minute word drill, described below.
+
 Modules follow the real blueprint rather than drawing at random:
 
 | | Reading and Writing | Math |
@@ -65,6 +70,38 @@ Modules follow the real blueprint rather than drawing at random:
 | Domain split | 7 Craft and Structure / 6 Information and Ideas / 8 Standard English Conventions / 6 Expression of Ideas | 7 Algebra / 7 Advanced Math / 4 Problem-Solving and Data Analysis / 4 Geometry and Trigonometry |
 | Order | grouped by domain, easy→hard within each | mixed domains, roughly ascending difficulty |
 | Grid-ins | — | 6, placed at the end |
+
+## Vocabulary drill
+
+Twelve questions, about three minutes, alternating between *what does this word mean?* and
+*which word means this?*
+
+The useful part is where the wrong answers come from. Every "Words in Context" question ships
+four options that College Board's writers chose to be confusable with each other, so each
+question becomes a ready-made four-way vocabulary item with professionally written
+distractors. Ask what *invalidate* means and the decoys are *underscore*, *dispute* and
+*withdraw* — *dispute* is a genuine near-miss. Pairing a word with three random others never
+produces that.
+
+**83 groups, 322 words**, drawn only from retired questions. A bare word isn't a spoiler, but
+a group of four is a fingerprint of one specific question, so the same exclusion applies here
+as everywhere else.
+
+The definitions are written for the **SAT sense**, which is usually not a dictionary's first
+one: *arbitrary* as "based on whim rather than reason", *facile* as "easy in a way that is
+shallow". That distinction is the whole point of writing them for this project rather than
+pulling from a dictionary API, which picks the wrong sense often enough to teach the wrong
+thing. Like the rest of the code they were drafted with AI assistance and are still being
+reviewed — corrections welcome.
+
+Progress is a Leitner box per word: three correct in a row counts as known, one wrong sends it
+back to the start. Each session is roughly a third new words and two thirds review, weighted
+towards whatever you're weakest on — the first version took every new word before revisiting
+any, which is a shuffled deck rather than spaced repetition.
+
+`vocab.js` holds the words and their definitions and nothing else. **No College Board text is
+stored**, and the sentences the words came from are deliberately left out: showing the sentence
+*is* the question, so practising vocabulary would spoil it for you later in a module.
 
 ## Bluebook behaviour
 

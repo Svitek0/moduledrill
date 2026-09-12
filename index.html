@@ -134,6 +134,41 @@
     font-size:14px;font-weight:600;cursor:pointer}
 
   /* ---------- nav popup ---------- */
+
+  /* ---------- vocabulary drill ---------- */
+  .card.vocabcard{border-color:var(--ok)}
+  .card.vocabcard:hover{border-color:var(--ok);box-shadow:0 3px 12px rgba(19,122,63,.15)}
+  .card.vocabcard b::before{content:"A ";font-family:Georgia,serif;font-style:italic;color:var(--ok)}
+  .vocabwrap{max-width:660px}
+  .vocabtop{display:flex;align-items:center;gap:14px;margin-bottom:30px}
+  .vprog{flex:1;height:5px;background:var(--line2);border-radius:3px;overflow:hidden}
+  .vprog i{display:block;height:100%;background:var(--ok);transition:width .25s ease}
+  .vcount{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .vask{font-size:14px;color:var(--muted);margin:0 0 10px;text-transform:uppercase;
+    letter-spacing:.06em;font-weight:600}
+  .vprompt{font-size:22px;line-height:1.45;margin-bottom:26px}
+  .vprompt.isword{font-size:38px;font-weight:700;letter-spacing:-.5px}
+  .vopts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .vopt{width:100%;text-align:left;border:1.5px solid var(--line);border-radius:9px;
+    padding:14px 16px;background:#fff;cursor:pointer;font-size:16.5px;line-height:1.45;
+    position:relative;transition:border-color .12s,background .12s}
+  .vopt:hover:not(:disabled){border-color:var(--ok);background:#f6fbf8}
+  .vopt:disabled{cursor:default}
+  .vopt.right{border-color:var(--ok);background:#f1faf4;border-width:2px;padding:13px 15px}
+  .vopt.wrong{border-color:var(--warn);background:#fdf3f2;border-width:2px;padding:13px 15px}
+  .vopt.dim{opacity:.5}
+  .vopt .tick,.vopt .cross{position:absolute;right:14px;top:50%;transform:translateY(-50%);
+    font-weight:700}
+  .vopt .tick{color:var(--ok)} .vopt .cross{color:var(--warn)}
+  .vfeed{margin:22px 0 20px;padding:14px 17px;border-radius:8px;font-size:15.5px;line-height:1.55;
+    border-left:3px solid var(--ok);background:var(--band)}
+  .vfeed.no{border-left-color:var(--warn)}
+  .vfeed b{font-size:17px}
+  @media (max-width:560px){
+    .vprompt.isword{font-size:30px}
+    .vopt{font-size:15.5px;padding:12px 14px}
+  }
+
   /* ---------- floating calculator ---------- */
   .calcpanel{position:fixed;z-index:55;background:#fff;border:1px solid var(--line);
     border-radius:10px;box-shadow:0 10px 34px rgba(0,0,0,.26);display:flex;
@@ -313,6 +348,7 @@
 <div id="app" class="hidden"></div>
 
 <script src="gridins.js"></script>
+<script src="vocab.js"></script>
 <script>
 /* =========================================================================
    Digital-SAT-style module simulator over the College Board Question Bank.
@@ -1053,6 +1089,7 @@ const fmt = ms => {
 
 // =============================== RENDERING ==================================
 function render() {
+  if (V) return renderVocab();          // vocab runs outside the session model
   if (!S) return renderMenu();
   if (S.view === 'break') return renderBreak();
   if (S.view === 'results') return renderResults();
@@ -1072,6 +1109,8 @@ function renderMenu() {
   try { missCount = Bank.count(); } catch (e) { missCount = 0; }
   let resume = null;
   try { resume = Resume.peek(); } catch (e) { resume = null; }
+  let vocabProg = null;
+  try { vocabProg = Vocab.progress(); } catch (e) { vocabProg = null; }
   const ago = m => m < 1 ? 'just now' : m < 60 ? m + ' min ago'
              : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago';
   // safe counts are what's left after exclusion, regardless of the current toggle
@@ -1122,6 +1161,16 @@ function renderMenu() {
         Left ${ago(resume.agoMins)}; the timer was paused while you were away.</span></button>
       <button class="card" id="discardcard"><b>Discard it</b>
         <span>Throw the unfinished session away and start something new.</span></button>
+    </div>` : ''}
+
+    ${vocabProg && vocabProg.total ? `
+    <h2>Vocabulary</h2>
+    <div class="cards">
+      <button class="card vocabcard" id="vocabcard">
+        <b>Words in Context drill</b>
+        <span>${vocabProg.total} words taken from real SAT answer choices, with the three
+        wrong options College Board picked to be confusable. ${vocabProg.known} known,
+        ${vocabProg.seen - vocabProg.known} still settling. Twelve questions, about three minutes.</span></button>
     </div>` : ''}
 
     ${missCount ? `
@@ -1226,6 +1275,8 @@ function renderMenu() {
   };
 
   app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  const vc = $('#vocabcard');
+  if (vc) vc.onclick = () => startVocab();
   const rc = $('#resumecard');
   if (rc) rc.onclick = async () => {
     if (!await Resume.restore()) {
@@ -1677,6 +1728,186 @@ function renderResults() {
 }
 
 // ---- math reference sheet --------------------------------------------------
+
+/* --------------------------------------------------------------------------
+   Vocabulary drill.
+
+   Every "Words in Context" question ships four answer options that College
+   Board's writers chose to be confusable with one another. That makes each
+   question a ready-made four-way vocabulary item with professionally written
+   distractors — far better than pairing a word with three random others.
+
+   vocab.js holds only those option words and definitions written for the SAT
+   sense, which is the sense a dictionary usually lists third. No College Board
+   text is stored: a bare word is not a question, and the sentences the words
+   came from are deliberately left out so practising vocabulary can't spoil the
+   same question later in a module.
+
+   Progress is a Leitner box per word, in localStorage, under its own key.
+   -------------------------------------------------------------------------- */
+const VOCAB_SCHEMA = 1;
+const VOCAB_ROUNDS = 12;
+const BOX_MAX = 3;                 // three correct in a row and a word counts as known
+
+let V = null;                      // active vocab session, null when not playing
+
+const Vocab = {
+  ready() { return typeof VOCAB !== 'undefined' && Array.isArray(VOCAB.groups) && VOCAB.groups.length; },
+  load() {
+    const raw = LS.get('vocab', null);
+    if (!raw || raw.v !== VOCAB_SCHEMA || typeof raw.w !== 'object' || raw.w === null) {
+      return { v: VOCAB_SCHEMA, w: {} };
+    }
+    return raw;
+  },
+  save(st) { LS.set('vocab', st); },
+
+  progress() {
+    if (!this.ready()) return { total: 0, seen: 0, known: 0 };
+    const st = this.load();
+    const words = new Set(VOCAB.groups.flatMap(g => g.w));
+    let seen = 0, known = 0;
+    for (const w of words) {
+      const b = st.w[w];
+      if (!b) continue;
+      seen++;
+      if (b[0] >= BOX_MAX) known++;
+    }
+    return { total: words.size, seen, known };
+  },
+
+  /** One session: a few new words, the rest review.
+
+      Taking every unseen word first would mean 27 sessions of new material
+      before anything came back — which is a shuffled deck, not spaced
+      repetition. A third new and two thirds review means a word you met today
+      returns while you still half-remember it, which is the point. */
+  build(n = VOCAB_ROUNDS) {
+    const st = this.load(), fresh = [], seen = [];
+    VOCAB.groups.forEach((g, gi) => g.w.forEach((w, wi) => {
+      const rec = st.w[w];
+      (rec ? seen : fresh).push({ gi, wi, word: w,
+                                  box: rec ? rec[0] : -1, last: rec ? rec[1] : 0 });
+    }));
+    // weakest and least recently seen come back first
+    seen.sort((a, b) => a.box - b.box || a.last - b.last);
+    for (let i = fresh.length - 1; i > 0; i--) {             // new words in any order
+      const j = Math.random() * (i + 1) | 0; [fresh[i], fresh[j]] = [fresh[j], fresh[i]];
+    }
+    const wantNew = Math.min(fresh.length, Math.max(1, Math.round(n / 3)));
+    const picked = [], usedGroup = new Set();
+    const take = list => { for (const c of list) {
+      if (picked.length >= n) return;
+      if (usedGroup.has(c.gi)) continue;                     // one word per group per session
+      usedGroup.add(c.gi); picked.push(c);
+    } };
+    take(seen.slice(0, n - wantNew));
+    take(fresh);
+    take(seen);                                              // top up if groups collided
+    for (let i = picked.length - 1; i > 0; i--) {            // don't group new vs review
+      const j = Math.random() * (i + 1) | 0; [picked[i], picked[j]] = [picked[j], picked[i]];
+    }
+    return picked.map(c => ({ ...c, dir: Math.random() < 0.5 ? 'w2d' : 'd2w' }));
+  },
+
+  record(word, ok) {
+    const st = this.load();
+    const box = st.w[word] ? st.w[word][0] : 0;
+    st.w[word] = [ok ? Math.min(BOX_MAX, box + 1) : 0, Date.now()];
+    this.save(st);
+  },
+  reset() { LS.set('vocab', { v: VOCAB_SCHEMA, w: {} }); },
+};
+
+function startVocab() {
+  if (!Vocab.ready()) return;
+  const rounds = Vocab.build();
+  if (!rounds.length) return;
+  V = { rounds, i: 0, correct: 0, answered: null, order: null };
+  render();
+}
+
+function renderVocab() {
+  const r = V.rounds[V.i];
+  const g = VOCAB.groups[r.gi];
+  // option order is fixed once per round so feedback can't reshuffle under you
+  if (!V.order) {
+    V.order = [0, 1, 2, 3];
+    for (let i = 3; i > 0; i--) { const j = Math.random() * (i + 1) | 0;
+      [V.order[i], V.order[j]] = [V.order[j], V.order[i]]; }
+  }
+  const askWord = r.dir === 'w2d';
+  const prompt = askWord ? g.w[r.wi] : g.d[r.wi];
+  const choice = k => askWord ? g.d[k] : g.w[k];
+  const done = V.answered !== null;
+
+  app.innerHTML = `
+    <div class="screen"><div class="wrap vocabwrap">
+      <div class="vocabtop">
+        <button class="tbtn" id="vquit">← Menu</button>
+        <div class="vprog"><i style="width:${Math.round(V.i / V.rounds.length * 100)}%"></i></div>
+        <span class="vcount">${V.i + 1} / ${V.rounds.length}</span>
+      </div>
+
+      <p class="vask">${askWord ? 'What does this word mean?' : 'Which word means this?'}</p>
+      <div class="vprompt ${askWord ? 'isword' : ''}">${prompt}</div>
+
+      <ul class="vopts">
+        ${V.order.map(k => {
+          const isRight = k === r.wi, picked = V.answered === k;
+          const cls = !done ? '' : isRight ? 'right' : (picked ? 'wrong' : 'dim');
+          return `<li><button class="vopt ${cls}" data-k="${k}" ${done ? 'disabled' : ''}>
+            ${choice(k)}${done && isRight ? '<span class="tick">✓</span>' : ''}
+            ${done && picked && !isRight ? '<span class="cross">✕</span>' : ''}
+          </button></li>`;
+        }).join('')}
+      </ul>
+
+      ${done ? `<div class="vfeed ${V.answered === r.wi ? 'ok' : 'no'}">
+          <b>${g.w[r.wi]}</b> — ${g.d[r.wi]}
+        </div>
+        <button class="navbtn" id="vnext">${V.i + 1 < V.rounds.length ? 'Next' : 'Finish'}</button>` : ''}
+    </div></div>`;
+
+  $('#vquit').onclick = () => { V = null; render(); };
+  app.querySelectorAll('.vopt').forEach(b => b.onclick = () => {
+    if (V.answered !== null) return;
+    V.answered = +b.dataset.k;
+    const ok = V.answered === r.wi;
+    if (ok) V.correct++;
+    Vocab.record(g.w[r.wi], ok);
+    render();
+  });
+  const nx = $('#vnext');
+  if (nx) nx.onclick = () => {
+    V.i++; V.answered = null; V.order = null;
+    if (V.i >= V.rounds.length) return renderVocabDone();
+    render();
+  };
+}
+
+function renderVocabDone() {
+  const p = Vocab.progress(), got = V.correct, of = V.rounds.length;
+  app.innerHTML = `
+    <div class="screen"><div class="wrap vocabwrap">
+      <h1>${got} of ${of}</h1>
+      <p class="sub">${got === of ? 'All correct.' :
+        got >= of * 0.7 ? 'Good round — the ones you missed come back sooner.' :
+        'The ones you missed come back sooner.'}</p>
+      <div class="big">
+        <div class="stat"><b>${p.known}</b><span>Words known</span></div>
+        <div class="stat"><b>${p.seen}</b><span>Words seen</span></div>
+        <div class="stat"><b>${p.total}</b><span>In the set</span></div>
+      </div>
+      <p class="sub" style="margin-top:22px">A word counts as known after you get it right
+        ${BOX_MAX} times running. Getting it wrong sends it back to the start.</p>
+      <button class="navbtn" id="vagain">Another round</button>
+      <button class="navbtn ghost" id="vhome" style="margin-left:10px">Back to menu</button>
+    </div></div>`;
+  $('#vagain').onclick = () => startVocab();
+  $('#vhome').onclick = () => { V = null; render(); };
+}
+
 /* --------------------------------------------------------------------------
    Floating calculator.
 
