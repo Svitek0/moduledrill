@@ -1495,6 +1495,11 @@ function renderQuestion() {
   if (q.type === 'spr') {
     const inp = $('#sprin');
     inp.oninput = () => {
+      // Bluebook's field: digits, . / and a leading minus; 5 characters, 6 if negative.
+      // Without this, "3 1/2" previews as typed but grades as 31/2, and "50%" earns credit.
+      const v = inp.value.replace(/[^0-9./-]/g, '').replace(/(?!^)-/g, '');
+      const capped = v.slice(0, v[0] === '-' ? 6 : 5);
+      if (capped !== inp.value) inp.value = capped;
       S.resp[S.stage][S.idx] = inp.value;
       $('#sprprev').textContent = inp.value ? 'Answer preview: ' + inp.value : '';
       clearTimeout(inp._save);              // typing shouldn't write on every key
@@ -1539,8 +1544,8 @@ const sprHTML = resp => `
     <input id="sprin" type="text" autocomplete="off" spellcheck="false"
       value="${resp == null ? '' : String(resp).replace(/"/g, '&quot;')}" placeholder="Type answer">
     <div class="sprprev" id="sprprev">${resp ? 'Answer preview: ' + resp : ''}</div>
-    <div class="sprprev">Fractions like <code>3/4</code> and decimals both count. No commas,
-      no % or $ signs. Negative answers use a leading minus.</div>
+    <div class="sprprev">Fractions like <code>3/4</code> and decimals both count. Up to 5
+      characters, 6 for a negative answer with a leading minus. No commas, % or $ signs.</div>
   </div>`;
 
 // ---- question navigator ----------------------------------------------------
