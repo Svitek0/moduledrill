@@ -107,8 +107,6 @@
   .opt.struck .body{text-decoration:line-through}
   .opt.correct{border-color:var(--ok);background:#f1faf4}
   .opt.wrong{border-color:var(--warn);background:#fdf3f2}
-  .undo{position:absolute;right:-46px;top:50%;transform:translateY(-50%);font-size:11px;
-    background:none;border:none;text-decoration:underline;cursor:pointer;color:var(--muted)}
   .strikecol{position:absolute;right:-34px;top:50%;transform:translateY(-50%);
     width:24px;height:24px;border:1px solid var(--muted);border-radius:50%;background:#fff;
     font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -435,7 +433,8 @@ const DB = {
   },
   async put(store, key, val) {
     const s = await this._tx(store, 'readwrite');
-    return new Promise(res => { s.put(val, key).onsuccess = () => res(); });
+    // resolve on error too (e.g. storage full), or boot waits on this forever
+    return new Promise(res => { const r = s.put(val, key); r.onsuccess = r.onerror = () => res(); });
   },
   /** One transaction for many reads — far faster than awaiting each. */
   async getMany(store, keys) {
@@ -464,7 +463,7 @@ const DB = {
   },
   async clear(store) {
     const s = await this._tx(store, 'readwrite');
-    return new Promise(res => { s.clear().onsuccess = () => res(); });
+    return new Promise(res => { const r = s.clear(); r.onsuccess = r.onerror = () => res(); });
   },
 };
 
@@ -1146,7 +1145,7 @@ function renderMenu() {
 
     <h2>Full length</h2>
     <div class="cards">
-      <button class="card" data-go="full"><b>Full test</b><span>R&amp;W M1 + M2, 10-min break, Math M1 + M2 · 2 h 14 m</span></button>
+      <button class="card" data-go="full"><b>Full test</b><span>R&amp;W M1 + M2, 10-min break, Math M1 + M2 · 2 h 24 m</span></button>
       <button class="card" data-go="sec:rw"><b>Reading &amp; Writing section</b><span>Two 27-question modules · 64 min</span></button>
       <button class="card" data-go="sec:math"><b>Math section</b><span>Two 22-question modules · 70 min</span></button>
     </div>
@@ -1213,8 +1212,8 @@ function renderMenu() {
       </fieldset>
       <fieldset><legend>Length</legend>
         <div class="row">
-          <label>Questions <input type="number" id="dn" value="15" min="1" max="80"></label>
-          <label>Minutes <input type="number" id="dm" value="18" min="1" max="180"></label>
+          <label>Questions <input type="number" id="dn" value="15" min="1" max="80" required></label>
+          <label>Minutes <input type="number" id="dm" value="18" min="1" max="180" required></label>
           <span id="poolsize" style="color:var(--muted)"></span>
         </div>
       </fieldset>
@@ -1293,7 +1292,10 @@ function renderMenu() {
   };
   $('#noactive').onchange = e => { noActive = e.target.checked; LS.set('noActive', noActive); renderMenu(); };
   $('#resetseen').onclick = () => { seen = new Set(); LS.set('seen', []); renderMenu(); };
-  const rh = $('#resethist'); if (rh) rh.onclick = () => { LS.set('history', []); renderMenu(); };
+  const rh = $('#resethist');
+  if (rh) rh.onclick = () => {
+    if (confirm('Clear your session history? This cannot be undone.')) { LS.set('history', []); renderMenu(); }
+  };
 
   // custom-drill wiring
   const chips = $('#domchips');
@@ -1391,7 +1393,7 @@ function go(cmd) {
                            label: 'Your mistakes', qs, mins: Math.max(5, Math.round(qs.length * 1.4)) }]);
   }
   if (kind === 'mod') {
-    const label = SPEC[a].name + ' — Module ' + (b === 'm1' ? '1' : '2');
+    const label = SPEC[a].name + ' — Module ' + (b === 'm1' ? '1' : '2 (harder)');
     return startSession([{ sec: a, kind: 'mod', label, qs: buildModule(a, MIX[b]), mins: SPEC[a].mins }]);
   } else if (kind === 'sec') {
     return startSession(sectionPlan(a));
@@ -1411,7 +1413,7 @@ function sectionPlan(sec) {
 function renderBreak() {
   app.innerHTML = `<div class="screen"><div class="brk-mid">
     <h1>Break</h1>
-    <div class="clock" id="brkclock">10:00</div>
+    <div class="clock" id="brkclock">${fmt(S.endsAt - Date.now())}</div>
     <p class="sub" style="max-width:440px">Stand up, drink water. On the real test you may not
       touch your phone or leave without permission. The Math section starts automatically.</p>
     <button class="navbtn" id="skipbrk">Resume testing</button>
@@ -1423,8 +1425,9 @@ function renderBreak() {
 // ---- question screen -------------------------------------------------------
 function renderQuestion() {
   const m = S.plan[S.stage];
-  const isMath = m.sec === 'math';
   const q = m.qs[S.idx];
+  // per question, not per session: a "Your mistakes" drill mixes both sections
+  const isMath = q.dom in SPEC.math.doms;
   const resp = S.resp[S.stage][S.idx];
   const marked = S.marks[S.stage][S.idx];
   const struck = S.strikes[S.stage][S.idx];
@@ -1653,6 +1656,7 @@ function renderResults() {
   const correct = flat.filter(f => f.ok).length;
   const blank = flat.filter(f => f.resp === null || f.resp === '').length;
   const mins = Math.round((Date.now() - S.startedAt) / 60000);
+  const skillLabel = {};   // one row per skill despite CB's case/padding variants
 
   const group = (keyFn) => {
     const g = {};
@@ -1686,7 +1690,7 @@ function renderResults() {
     </div>` : ''}
 
     <h2>By domain</h2>${tbl(group(f => f.q.domName), 'Domain')}
-    <h2>By skill</h2>${tbl(group(f => f.q.skill), 'Skill')}
+    <h2>By skill</h2>${tbl(group(f => skillLabel[skillKey(f.q)] ||= (f.q.skill || '').trim()), 'Skill')}
     <h2>By difficulty</h2>${tbl(group(f => ({ E: 'Easy', M: 'Medium', H: 'Hard' })[f.q.diff]), 'Level')}
 
     <h2>Question review</h2>
@@ -1795,11 +1799,12 @@ const Vocab = {
       const j = Math.random() * (i + 1) | 0; [fresh[i], fresh[j]] = [fresh[j], fresh[i]];
     }
     const wantNew = Math.min(fresh.length, Math.max(1, Math.round(n / 3)));
-    const picked = [], usedGroup = new Set();
+    const picked = [], usedGroup = new Set(), usedWord = new Set();
     const take = list => { for (const c of list) {
       if (picked.length >= n) return;
-      if (usedGroup.has(c.gi)) continue;                     // one word per group per session
-      usedGroup.add(c.gi); picked.push(c);
+      // one word per group per session, and 10 words sit in two groups each
+      if (usedGroup.has(c.gi) || usedWord.has(c.word)) continue;
+      usedGroup.add(c.gi); usedWord.add(c.word); picked.push(c);
     } };
     take(seen.slice(0, n - wantNew));
     take(fresh);
@@ -2096,6 +2101,11 @@ window.addEventListener('resize', () => { try { Calc.reflow(); } catch (e) {} })
 
 document.addEventListener('keydown', e => {
   if (!S || S.view !== 'q') return;
+  // Leave browser shortcuts alone: Cmd+C used to pick answer C, Ctrl+D answer D.
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // With the navigator or reference sheet open, keys would change the question underneath it.
+  const pop = $('.navpop');
+  if (pop) { if (e.key === 'Escape') pop.remove(); return; }
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') $('#next').click(); return; }
   const m = S.plan[S.stage], q = m.qs[S.idx];
   if (e.key === 'ArrowRight') $('#next').click();
