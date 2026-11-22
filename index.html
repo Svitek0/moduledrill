@@ -81,6 +81,10 @@
   .abcbtn.on{background:var(--fg);color:#fff;border-color:var(--fg)}
   .stim,.stem{font-size:17px;line-height:1.62}
   .stem{margin-bottom:18px}
+  mark.hl{background:#ffe27a;color:inherit;cursor:pointer;border-radius:2px}
+  .tool.on{color:var(--sel);font-weight:600}
+  .verdict{margin:14px 0 0;font-weight:600}
+  .verdict.ok{color:var(--ok)} .verdict.no{color:var(--warn)}
   .stim p,.stem p{margin:0 0 14px}
   .stim table,.stem table{border-collapse:collapse;margin:12px 0;font-size:15px}
   .stim td,.stim th,.stem td,.stem th{border:1px solid var(--line);padding:5px 10px;text-align:center}
@@ -107,8 +111,6 @@
   .opt.struck .body{text-decoration:line-through}
   .opt.correct{border-color:var(--ok);background:#f1faf4}
   .opt.wrong{border-color:var(--warn);background:#fdf3f2}
-  .undo{position:absolute;right:-46px;top:50%;transform:translateY(-50%);font-size:11px;
-    background:none;border:none;text-decoration:underline;cursor:pointer;color:var(--muted)}
   .strikecol{position:absolute;right:-34px;top:50%;transform:translateY(-50%);
     width:24px;height:24px;border:1px solid var(--muted);border-radius:50%;background:#fff;
     font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -326,9 +328,11 @@
     .hleft{font-size:13px;min-width:0}
     .hleft small{display:none}
     .hright{gap:10px;min-width:0}
-    .tool{font-size:10px;padding:2px}
-    .tool span.ic{font-size:15px}
+    /* four math tools don't fit with labels; icons only (the text stays for screen readers) */
+    .tool{font-size:0;padding:4px}
+    .tool span.ic{font-size:18px}
     .timer{font-size:19px}
+    .timerwrap{min-width:0}
     .qhead .acts{gap:8px;padding:5px 8px}
     footer{padding:9px 12px;gap:8px}
     .navbtn{padding:8px 15px;font-size:13px}
@@ -435,7 +439,8 @@ const DB = {
   },
   async put(store, key, val) {
     const s = await this._tx(store, 'readwrite');
-    return new Promise(res => { s.put(val, key).onsuccess = () => res(); });
+    // resolve on error too (e.g. storage full), or boot waits on this forever
+    return new Promise(res => { const r = s.put(val, key); r.onsuccess = r.onerror = () => res(); });
   },
   /** One transaction for many reads — far faster than awaiting each. */
   async getMany(store, keys) {
@@ -464,7 +469,7 @@ const DB = {
   },
   async clear(store) {
     const s = await this._tx(store, 'readwrite');
-    return new Promise(res => { s.clear().onsuccess = () => res(); });
+    return new Promise(res => { const r = s.clear(); r.onsuccess = r.onerror = () => res(); });
   },
 };
 
@@ -895,6 +900,7 @@ const Resume = {
         stage: S.stage, idx: S.idx, view: S.view,
         abc: S.abc, hideTimer: S.hideTimer, expired: !!S.expired,
         resp: S.resp, marks: S.marks, strikes: S.strikes,
+        time: S.time, hl: S.hl, checked: S.checked, tutor: S.tutor,
         plan: S.plan.map(m => ({
           sec: m.sec, kind: m.kind, label: m.label, mins: m.mins,
           route: m.route, pending: !!m.pending,
@@ -939,8 +945,15 @@ const Resume = {
     }
     S = { plan, stage: d.stage, view: d.view, idx: d.idx,
           resp: d.resp, marks: d.marks, strikes: d.strikes,
+          // snapshots from before these existed lack them
+          time: d.time || d.resp.map(r => r.map(() => 0)),
+          hl: d.hl || d.resp.map(r => r.map(() => null)),
+          checked: d.checked || d.resp.map(r => r.map(() => false)),
+          tutor: !!d.tutor,
           abc: d.abc, hideTimer: d.hideTimer, expired: d.expired,
-          endsAt: Date.now() + d.left, startedAt: d.startedAt || Date.now() };
+          endsAt: Date.now() + d.left,
+          // the clock paused while you were away, so Elapsed shouldn't count that gap
+          startedAt: (d.startedAt || d.at) + (Date.now() - d.at) };
 
     // Every stage with questions has to be hydrated, not just the current one:
     // finish() scores the whole plan, and the review list needs the content of
@@ -969,7 +982,7 @@ const Resume = {
 addEventListener('pagehide', () => Resume.save());
 addEventListener('visibilitychange', () => { if (document.hidden) Resume.save(); });
 
-async function startSession(plan) {
+async function startSession(plan, tutor = false) {
   S = {
     plan,                     // [{sec, label, qs, mins, kind}]
     stage: 0,
@@ -978,6 +991,10 @@ async function startSession(plan) {
     resp: plan.map(m => m.qs.map(() => null)),
     marks: plan.map(m => m.qs.map(() => false)),
     strikes: plan.map(m => m.qs.map(() => [])),
+    time: plan.map(m => m.qs.map(() => 0)),        // ms each question was on screen
+    hl: plan.map(m => m.qs.map(() => null)),       // highlighted {sti, stem} HTML
+    checked: plan.map(m => m.qs.map(() => false)), // tutor mode: answer revealed
+    tutor,                    // drills only: check each answer as you go
     abc: false,
     hideTimer: false,
     endsAt: 0,
@@ -1020,6 +1037,9 @@ async function advance() {
     S.resp[S.stage + 1] = next.qs.map(() => null);
     S.marks[S.stage + 1] = next.qs.map(() => false);
     S.strikes[S.stage + 1] = next.qs.map(() => []);
+    S.time[S.stage + 1] = next.qs.map(() => 0);
+    S.hl[S.stage + 1] = next.qs.map(() => null);
+    S.checked[S.stage + 1] = next.qs.map(() => false);
     next.pending = false;
   }
   S.stage++;
@@ -1056,10 +1076,18 @@ const netMessage = e => navigator.onLine === false
 
 // ---- timer -----------------------------------------------------------------
 let tick = null;
+/** Charge the time since the last call to whichever question was on screen. */
+function credit() {
+  const now = Date.now();
+  if (S.on && S.time[S.on[0]]) S.time[S.on[0]][S.on[1]] += now - S.on[2];
+  S.on = S.view === 'q' ? [S.stage, S.idx, now] : null;
+}
 function startTimer() {
   clearInterval(tick);
+  credit();              // every render lands here, so navigation is charged exactly
   tick = setInterval(() => {
     if (!S) { clearInterval(tick); return; }
+    credit();
     const left = S.endsAt - Date.now();
 
     if (left <= 0) {
@@ -1146,7 +1174,7 @@ function renderMenu() {
 
     <h2>Full length</h2>
     <div class="cards">
-      <button class="card" data-go="full"><b>Full test</b><span>R&amp;W M1 + M2, 10-min break, Math M1 + M2 · 2 h 14 m</span></button>
+      <button class="card" data-go="full"><b>Full test</b><span>R&amp;W M1 + M2, 10-min break, Math M1 + M2 · 2 h 24 m</span></button>
       <button class="card" data-go="sec:rw"><b>Reading &amp; Writing section</b><span>Two 27-question modules · 64 min</span></button>
       <button class="card" data-go="sec:math"><b>Math section</b><span>Two 22-question modules · 70 min</span></button>
     </div>
@@ -1213,10 +1241,12 @@ function renderMenu() {
       </fieldset>
       <fieldset><legend>Length</legend>
         <div class="row">
-          <label>Questions <input type="number" id="dn" value="15" min="1" max="80"></label>
-          <label>Minutes <input type="number" id="dm" value="18" min="1" max="180"></label>
+          <label>Questions <input type="number" id="dn" value="15" min="1" max="80" required></label>
+          <label>Minutes <input type="number" id="dm" value="18" min="1" max="180" required></label>
           <span id="poolsize" style="color:var(--muted)"></span>
         </div>
+        <label style="display:block;margin-top:10px"><input type="checkbox" id="tutor" ${LS.get('tutor', false) ? 'checked' : ''}>
+          Check each answer as I go (shows the explanation right away; also applies to "Your mistakes")</label>
       </fieldset>
       <button class="navbtn" type="submit">Start drill</button>
     </form>
@@ -1234,6 +1264,8 @@ function renderMenu() {
         <td>${h.correct}/${h.total}</td><td>${Math.round(h.correct / h.total * 100)}%</td></tr>`).join('')}
     </table>` : ''}
 
+    ${progressHTML(hist)}
+
     <h2>Storage</h2>
     <p style="font-size:13.5px;color:var(--muted);margin:0 0 12px">
       Questions are fetched from College Board as you need them and kept in this browser,
@@ -1245,6 +1277,14 @@ function renderMenu() {
     <div class="row">
       <button class="chip" id="cacheall">Cache everything for offline</button>
       <button class="chip" id="clearcache">Clear cached questions</button>
+    </div>
+    <p style="font-size:13.5px;color:var(--muted);margin:18px 0 12px">
+      Your history, mistakes, vocabulary progress and settings live only in this browser.
+      Clearing site data deletes them, so keep a backup, or use one to move to another device.</p>
+    <div class="row">
+      <button class="chip" id="backup">Download progress backup</button>
+      <label class="chip" style="cursor:pointer">Restore from backup
+        <input type="file" id="restore" accept=".json,application/json" hidden></label>
     </div>
 
     <p style="margin-top:26px;font-size:13px;color:var(--muted)">
@@ -1268,6 +1308,36 @@ function renderMenu() {
       await withLoading('Caching every question', p => hydrate(all, p));
     } catch (e) { alert(netMessage(e)); }
     renderMenu();
+  };
+  $('#backup').onclick = () => {
+    const out = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k.startsWith('satsim.')) out[k] = localStorage.getItem(k);
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ moduledrill: 1, at: new Date().toISOString(), data: out })],
+                                          { type: 'application/json' }));
+    a.download = 'moduledrill-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $('#restore').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    let data;
+    try {
+      const d = JSON.parse(await file.text());
+      data = d && d.moduledrill === 1 && d.data;
+      // only our own keys, each holding valid JSON, so a bad file can't poison the app
+      if (!data || typeof data !== 'object' || !Object.entries(data).every(([k, v]) =>
+            k.startsWith('satsim.') && typeof v === 'string' && (JSON.parse(v), true))) throw 0;
+    } catch (err) { alert("That file isn't a ModuleDrill backup."); return; }
+    if (!confirm('Replace your current history, mistakes, vocabulary progress and settings with this backup?')) return;
+    Object.keys(localStorage).filter(k => k.startsWith('satsim.')).forEach(k => localStorage.removeItem(k));
+    try { Object.entries(data).forEach(([k, v]) => localStorage.setItem(k, v)); }
+    catch (err) { alert('Not all of the backup fit in browser storage.'); }
+    location.reload();                    // every module reads its state at load
   };
   $('#clearcache').onclick = async () => {
     if (!confirm('Delete every cached question? They will be re-fetched as needed.')) return;
@@ -1293,7 +1363,10 @@ function renderMenu() {
   };
   $('#noactive').onchange = e => { noActive = e.target.checked; LS.set('noActive', noActive); renderMenu(); };
   $('#resetseen').onclick = () => { seen = new Set(); LS.set('seen', []); renderMenu(); };
-  const rh = $('#resethist'); if (rh) rh.onclick = () => { LS.set('history', []); renderMenu(); };
+  const rh = $('#resethist');
+  if (rh) rh.onclick = () => {
+    if (confirm('Clear your session history? This cannot be undone.')) { LS.set('history', []); renderMenu(); }
+  };
 
   // custom-drill wiring
   const chips = $('#domchips');
@@ -1351,6 +1424,7 @@ function renderMenu() {
     c.classList.toggle('on'); poolInfo();
   });
   $('#dn').oninput = poolInfo;
+  $('#tutor').onchange = e => LS.set('tutor', e.target.checked);
   paintDoms();
 
   $('#drill').onsubmit = e => {
@@ -1365,8 +1439,27 @@ function renderMenu() {
       ? (customPool(sec, doms, diffs, skills)[0]?.skill || '').trim()   // skill_desc ships padded
       : null;
     const label = 'Custom drill — ' + (only || (skills.length ? skills.length + ' skills' : SPEC[sec].name));
-    startSession([{ sec, kind: 'drill', label, qs, mins: +$('#dm').value }]);
+    startSession([{ sec, kind: 'drill', label, qs, mins: +$('#dm').value }], LS.get('tutor', false));
   };
+}
+
+/** Accuracy per domain across every session that recorded it, with the last five beside it. */
+function progressHTML(hist) {
+  const withDoms = hist.filter(h => h.doms);
+  if (withDoms.length < 2) return '';
+  const sum = hs => hs.reduce((t, h) => {
+    for (const [k, [ok, n]] of Object.entries(h.doms)) { const r = t[k] ||= [0, 0]; r[0] += ok; r[1] += n; }
+    return t;
+  }, {});
+  const all = sum(withDoms), recent = sum(withDoms.slice(0, 5));
+  const pct = r => r ? Math.round(r[0] / r[1] * 100) + '%' : '·';
+  return `<h2>Progress by domain</h2>
+    <p class="sub" style="margin-bottom:12px">Across ${withDoms.length} sessions, weakest first.</p>
+    <table class="brk"><tr><th>Domain</th><th>All sessions</th><th>Last 5</th><th></th></tr>
+    ${Object.entries(all).sort((a, b) => a[1][0] / a[1][1] - b[1][0] / b[1][1]).map(([k, r]) => `
+      <tr><td>${k}</td><td>${r[0]}/${r[1]} · ${pct(r)}</td><td>${pct(recent[k])}</td>
+        <td><span class="bar"><i style="width:${Math.round(r[0] / r[1] * 100)}%"></i></span></td></tr>`).join('')}
+    </table>`;
 }
 
 /** A drill over your outstanding mistakes, hardest-hit first.
@@ -1388,10 +1481,11 @@ function go(cmd) {
     if (!qs.length) return;
     return startSession([{ sec: qs[0].dom in DOMNAME && ['H','P','Q','S'].includes(qs[0].dom) ? 'math' : 'rw',
                            kind: 'drill', mixed: true,
-                           label: 'Your mistakes', qs, mins: Math.max(5, Math.round(qs.length * 1.4)) }]);
+                           label: 'Your mistakes', qs, mins: Math.max(5, Math.round(qs.length * 1.4)) }],
+                         LS.get('tutor', false));
   }
   if (kind === 'mod') {
-    const label = SPEC[a].name + ' — Module ' + (b === 'm1' ? '1' : '2');
+    const label = SPEC[a].name + ' — Module ' + (b === 'm1' ? '1' : '2 (harder)');
     return startSession([{ sec: a, kind: 'mod', label, qs: buildModule(a, MIX[b]), mins: SPEC[a].mins }]);
   } else if (kind === 'sec') {
     return startSession(sectionPlan(a));
@@ -1411,7 +1505,7 @@ function sectionPlan(sec) {
 function renderBreak() {
   app.innerHTML = `<div class="screen"><div class="brk-mid">
     <h1>Break</h1>
-    <div class="clock" id="brkclock">10:00</div>
+    <div class="clock" id="brkclock">${fmt(S.endsAt - Date.now())}</div>
     <p class="sub" style="max-width:440px">Stand up, drink water. On the real test you may not
       touch your phone or leave without permission. The Math section starts automatically.</p>
     <button class="navbtn" id="skipbrk">Resume testing</button>
@@ -1423,13 +1517,17 @@ function renderBreak() {
 // ---- question screen -------------------------------------------------------
 function renderQuestion() {
   const m = S.plan[S.stage];
-  const isMath = m.sec === 'math';
   const q = m.qs[S.idx];
+  // per question, not per session: a "Your mistakes" drill mixes both sections
+  const isMath = q.dom in SPEC.math.doms;
   const resp = S.resp[S.stage][S.idx];
   const marked = S.marks[S.stage][S.idx];
   const struck = S.strikes[S.stage][S.idx];
+  const hl = S.hl[S.stage][S.idx] || {};
+  const checked = S.tutor && S.checked[S.stage][S.idx];
+  const answered = resp !== null && resp !== '';
 
-  const stimHTML = q.sti ? `<div class="pane left"><div class="stim">${q.sti}</div></div>` : '';
+  const stimHTML = q.sti ? `<div class="pane left"><div class="stim">${hl.sti ?? q.sti}</div></div>` : '';
   const qbody = `
     <div class="qhead">
       <div class="qnum">${S.idx + 1}</div>
@@ -1440,8 +1538,11 @@ function renderQuestion() {
           title="Answer eliminator">ABC</button>` : ''}
       </div>
     </div>
-    <div class="stem">${q.stem}</div>
-    ${q.type === 'spr' ? sprHTML(resp) : optsHTML(q, resp, struck)}`;
+    <div class="stem">${hl.stem ?? q.stem}</div>
+    ${q.type === 'spr' ? sprHTML(resp, checked) : optsHTML(q, resp, struck, checked)}
+    ${checked ? `<p class="verdict ${isCorrect(q, resp) ? 'ok' : 'no'}">${isCorrect(q, resp)
+        ? 'Correct.' : 'Not quite. Correct answer: ' + (q.type === 'spr' ? q.ans.join(' or ') : q.ans.join('/'))}</p>
+      <details class="rat" open><summary>Explanation</summary><div>${q.rat}</div></details>` : ''}`;
 
   app.innerHTML = `
     <header>
@@ -1452,6 +1553,7 @@ function renderQuestion() {
         <button class="tbtn" id="thide">${S.hideTimer ? 'Show' : 'Hide'}</button>
       </div>
       <div class="hright">
+        <button class="tool ${S.hlOn ? 'on' : ''}" id="hlbtn" title="Highlight (Ctrl+H). Select text to highlight it, click a highlight to remove it."><span class="ic">🖍</span>Highlight</button>
         ${isMath ? `<button class="tool" id="calc"><span class="ic">🖩</span>Calculator</button>
                     <button class="tool" id="ref"><span class="ic">📐</span>Reference</button>` : ''}
         <button class="tool" id="quit"><span class="ic">✕</span>Exit</button>
@@ -1466,6 +1568,7 @@ function renderQuestion() {
       <button class="qpick" id="qpick">Question ${S.idx + 1} of ${m.qs.length} ▲</button>
       <div class="footright">
         <button class="navbtn ghost" id="back" ${S.idx === 0 ? 'disabled' : ''}>Back</button>
+        ${S.tutor && !checked ? `<button class="navbtn ghost" id="check" ${answered ? '' : 'disabled'}>Check</button>` : ''}
         <button class="navbtn" id="next">${S.idx === m.qs.length - 1 ? 'Review' : 'Next'}</button>
       </div>
     </footer>`;
@@ -1482,6 +1585,10 @@ function renderQuestion() {
     else { S.view = 'review'; renderReview(); }
   };
   $('#qpick').onclick = openNav;
+  $('#hlbtn').onclick = () => { S.hlOn = !S.hlOn; render(); };
+  const chk = $('#check');
+  if (chk) chk.onclick = () => { S.checked[S.stage][S.idx] = true; render(); };
+  wireHighlights();
   if (isMath) {
     $('#calc').onclick = () => Calc.toggle();
     $('#ref').onclick = showReference;
@@ -1492,11 +1599,19 @@ function renderQuestion() {
     Calc.close();
   }
 
-  if (q.type === 'spr') {
+  if (checked) {
+    // answer is locked once revealed; nothing to wire
+  } else if (q.type === 'spr') {
     const inp = $('#sprin');
     inp.oninput = () => {
+      // Bluebook's field: digits, . / and a leading minus; 5 characters, 6 if negative.
+      // Without this, "3 1/2" previews as typed but grades as 31/2, and "50%" earns credit.
+      const v = inp.value.replace(/[^0-9./-]/g, '').replace(/(?!^)-/g, '');
+      const capped = v.slice(0, v[0] === '-' ? 6 : 5);
+      if (capped !== inp.value) inp.value = capped;
       S.resp[S.stage][S.idx] = inp.value;
       $('#sprprev').textContent = inp.value ? 'Answer preview: ' + inp.value : '';
+      const c = $('#check'); if (c) c.disabled = !inp.value;
       clearTimeout(inp._save);              // typing shouldn't write on every key
       inp._save = setTimeout(() => Resume.save(), 400);
     };
@@ -1525,23 +1640,71 @@ function renderQuestion() {
   Resume.save();     // answers, marks, strikes and navigation all re-render
 }
 
-const optsHTML = (q, resp, struck) => `
+const optsHTML = (q, resp, struck, checked) => `
   <ul class="opts ${S.abc ? 'abcmode' : ''}">
     ${q.opts.map((o, i) => `
-      <li><button class="opt ${resp === i ? 'sel' : ''} ${struck.includes(i) ? 'struck' : ''}">
+      <li><button class="opt ${resp === i ? 'sel' : ''} ${struck.includes(i) ? 'struck' : ''}
+        ${checked ? (q.ans.includes(LETTERS[i]) ? 'correct' : resp === i ? 'wrong' : '') : ''}">
         <span class="ltr">${LETTERS[i]}</span><span class="body">${o}</span>
         ${S.abc ? `<span class="strikecol">${LETTERS[i]}</span>` : ''}
       </button></li>`).join('')}
   </ul>`;
 
-const sprHTML = resp => `
+const sprHTML = (resp, locked) => `
   <div class="sprwrap">
-    <input id="sprin" type="text" autocomplete="off" spellcheck="false"
+    <input id="sprin" type="text" autocomplete="off" spellcheck="false" ${locked ? 'disabled' : ''}
       value="${resp == null ? '' : String(resp).replace(/"/g, '&quot;')}" placeholder="Type answer">
     <div class="sprprev" id="sprprev">${resp ? 'Answer preview: ' + resp : ''}</div>
-    <div class="sprprev">Fractions like <code>3/4</code> and decimals both count. No commas,
-      no % or $ signs. Negative answers use a leading minus.</div>
+    <div class="sprprev">Fractions like <code>3/4</code> and decimals both count. Up to 5
+      characters, 6 for a negative answer with a leading minus. No commas, % or $ signs.</div>
   </div>`;
+
+// ---- highlighter -------------------------------------------------------------
+// The passage and stem are rebuilt on every render, so highlights are kept as
+// the marked-up HTML of each, per question, and survive navigation and resume.
+function wireHighlights() {
+  const save = () => {
+    const sti = $('.stim'), stem = $('.stem');
+    S.hl[S.stage][S.idx] = { sti: sti ? sti.innerHTML : undefined, stem: stem.innerHTML };
+    Resume.save();
+  };
+  app.querySelectorAll('.stim, .pane .stem').forEach(root => {
+    root.onmouseup = () => { if (S.hlOn && markSelection(root)) save(); };
+    root.onclick = e => {
+      const m = e.target.closest('mark.hl');
+      if (!m) return;
+      m.replaceWith(...m.childNodes);
+      root.normalize();
+      save();
+    };
+  });
+}
+
+/** Wrap the selected text inside root in <mark class="hl">. Returns true if anything was marked. */
+function markSelection(root) {
+  const sel = getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return false;
+  const r = sel.getRangeAt(0);
+  if (!root.contains(r.commonAncestorContainer)) return false;
+  const top = r.commonAncestorContainer.nodeType === 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
+  const walk = document.createTreeWalker(top, NodeFilter.SHOW_TEXT), nodes = [];
+  while (walk.nextNode()) {
+    const n = walk.currentNode;
+    // an HTML <mark> can't live inside MathML, and an existing highlight needs no second one
+    if (r.intersectsNode(n) && n.textContent.trim() && !n.parentNode.closest('math, mark.hl')) nodes.push(n);
+  }
+  for (let n of nodes) {
+    if (n === r.endContainer) n.splitText(r.endOffset);          // end first: same node keeps its start offset
+    if (n === r.startContainer) n = n.splitText(r.startOffset);
+    if (!n.textContent) continue;
+    const m = document.createElement('mark');
+    m.className = 'hl';
+    n.replaceWith(m);
+    m.appendChild(n);
+  }
+  sel.removeAllRanges();
+  return nodes.length > 0;
+}
 
 // ---- question navigator ----------------------------------------------------
 function openNav() {
@@ -1629,9 +1792,12 @@ function renderReview() {
 function finish() {
   clearInterval(tick);
   S.view = 'results';
+  credit();                               // charge the last question
   const flat = [];
   S.plan.forEach((m, si) => m.qs.forEach((q, i) =>
-    flat.push({ q, resp: S.resp[si][i], ok: isCorrect(q, S.resp[si][i]), mod: m.label, sec: m.sec })));
+    flat.push({ q, resp: S.resp[si][i], ok: isCorrect(q, S.resp[si][i]), mod: m.label,
+               ms: S.time[si][i] || 0,
+               sec: q.dom in SPEC.math.doms ? 'math' : 'rw' })));   // mistake drills mix sections
   S.flat = flat;
   const correct = flat.filter(f => f.ok).length;
   const hist = LS.get('history', []);
@@ -1639,6 +1805,8 @@ function finish() {
     when: new Date().toLocaleString(),
     what: S.plan.filter(m => m.kind !== 'break').map(m => m.label).join(' + '),
     correct, total: flat.length,
+    // per-domain tallies feed the "Progress by domain" table on the menu
+    doms: flat.reduce((d, f) => { const r = d[f.q.domName] ||= [0, 0]; r[1]++; if (f.ok) r[0]++; return d; }, {}),
   });
   LS.set('history', hist.slice(0, 40));
   // Bank update is isolated: if anything here throws, you still get your results.
@@ -1653,16 +1821,24 @@ function renderResults() {
   const correct = flat.filter(f => f.ok).length;
   const blank = flat.filter(f => f.resp === null || f.resp === '').length;
   const mins = Math.round((Date.now() - S.startedAt) / 60000);
+  const skillLabel = {};   // one row per skill despite CB's case/padding variants
+  const totMs = flat.reduce((n, f) => n + f.ms, 0);
+  const avg = fs => fs.reduce((n, f) => n + f.ms, 0) / fs.length;
+  const right = flat.filter(f => f.ok), wrongs = flat.filter(f => !f.ok);
+  const timed = S.plan.filter(m => m.kind !== 'break');
+  const budget = timed.reduce((n, m) => n + m.mins, 0) * 60000 / flat.length;
+  const slow = flat.map((f, n) => ({ ...f, n })).filter(f => f.ms > 2 * budget)
+    .sort((a, b) => b.ms - a.ms).slice(0, 6);
 
   const group = (keyFn) => {
     const g = {};
-    for (const f of flat) { const k = keyFn(f); (g[k] ||= { n: 0, ok: 0 }); g[k].n++; if (f.ok) g[k].ok++; }
+    for (const f of flat) { const k = keyFn(f); (g[k] ||= { n: 0, ok: 0, ms: 0 }); g[k].n++; g[k].ms += f.ms; if (f.ok) g[k].ok++; }
     return g;
   };
-  const tbl = (g, head) => `<table class="brk"><tr><th>${head}</th><th>Correct</th><th></th></tr>
+  const tbl = (g, head) => `<table class="brk"><tr><th>${head}</th><th>Correct</th><th>Avg time</th><th></th></tr>
     ${Object.entries(g).sort((a, b) => a[1].ok / a[1].n - b[1].ok / b[1].n).map(([k, v]) => {
       const p = Math.round(v.ok / v.n * 100);
-      return `<tr><td>${k}</td><td>${v.ok}/${v.n} · ${p}%</td>
+      return `<tr><td>${k}</td><td>${v.ok}/${v.n} · ${p}%</td><td>${fmt(v.ms / v.n)}</td>
         <td><span class="bar"><i style="width:${p}%"></i></span></td></tr>`;
     }).join('')}</table>`;
 
@@ -1674,7 +1850,13 @@ function renderResults() {
       <div class="stat"><b>${Math.round(correct / flat.length * 100)}%</b><span>Accuracy</span></div>
       <div class="stat"><b>${blank}</b><span>Left blank</span></div>
       <div class="stat"><b>${mins}m</b><span>Elapsed</span></div>
+      <div class="stat"><b>${fmt(totMs / flat.length)}</b><span>Avg per question</span></div>
     </div>
+    <div class="note"><b>Pacing.</b> The time limit you had works out to ${fmt(budget)} per question.
+      ${right.length ? `Questions you got right took ${fmt(avg(right))} on average` : 'You got none right'}${wrongs.length
+        ? `; the ones you missed or left blank took ${fmt(avg(wrongs))}` : ''}.
+      ${slow.length ? `Over twice the budget: ${slow.map(f => 'Q' + (f.n + 1) + ' (' + fmt(f.ms) + (f.ok ? '' : ', missed') + ')').join(', ')}.`
+        : 'Nothing took more than twice the budget.'}</div>
     <div class="note">No scaled score. This pool isn't adaptive and isn't equated, so a
       200–800 number here would be fiction. Read the domain table instead — that's the part
       that actually tells you where to spend the next two weeks.</div>
@@ -1686,7 +1868,7 @@ function renderResults() {
     </div>` : ''}
 
     <h2>By domain</h2>${tbl(group(f => f.q.domName), 'Domain')}
-    <h2>By skill</h2>${tbl(group(f => f.q.skill), 'Skill')}
+    <h2>By skill</h2>${tbl(group(f => skillLabel[skillKey(f.q)] ||= (f.q.skill || '').trim()), 'Skill')}
     <h2>By difficulty</h2>${tbl(group(f => ({ E: 'Easy', M: 'Medium', H: 'Hard' })[f.q.diff]), 'Level')}
 
     <h2>Question review</h2>
@@ -1695,7 +1877,10 @@ function renderResults() {
       <label><input type="checkbox" id="onlybad" checked> Show only wrong / blank</label>
     </div>
     <div id="revlist"></div>
-    <button class="navbtn" id="home" style="margin-top:26px">Back to menu</button>
+    <div class="row" style="margin-top:26px;gap:10px">
+      ${wrongs.length ? `<button class="navbtn ghost" id="retry">Drill these ${wrongs.length} again</button>` : ''}
+      <button class="navbtn" id="home">Back to menu</button>
+    </div>
   </div></div>`;
 
   const paint = () => {
@@ -1712,6 +1897,7 @@ function renderResults() {
           <span>${({ E: 'Easy', M: 'Medium', H: 'Hard' })[q.diff]}</span>
           <span>Your answer: <b>${given}</b></span>
           <span>Correct: <b>${right}</b></span>
+          <span>⏱ ${fmt(f.ms)}</span>
           <span>${f.ok ? '✅' : '❌'}</span></div>
         ${q.sti ? `<div class="stim">${q.sti}</div>` : ''}
         <div class="stem">${q.stem}</div>
@@ -1725,6 +1911,12 @@ function renderResults() {
   $('#onlybad').onchange = paint;
   paint();
   $('#home').onclick = () => { S = null; render(); };
+  const rt = $('#retry');
+  if (rt) rt.onclick = () => {
+    const qs = shuffle(wrongs.map(f => f.q));
+    startSession([{ sec: wrongs[0].sec, kind: 'drill', label: 'Retry: missed questions', qs,
+                    mins: Math.max(5, Math.round(qs.length * 1.4)) }], LS.get('tutor', false));
+  };
 }
 
 // ---- math reference sheet --------------------------------------------------
@@ -1795,11 +1987,12 @@ const Vocab = {
       const j = Math.random() * (i + 1) | 0; [fresh[i], fresh[j]] = [fresh[j], fresh[i]];
     }
     const wantNew = Math.min(fresh.length, Math.max(1, Math.round(n / 3)));
-    const picked = [], usedGroup = new Set();
+    const picked = [], usedGroup = new Set(), usedWord = new Set();
     const take = list => { for (const c of list) {
       if (picked.length >= n) return;
-      if (usedGroup.has(c.gi)) continue;                     // one word per group per session
-      usedGroup.add(c.gi); picked.push(c);
+      // one word per group per session, and 10 words sit in two groups each
+      if (usedGroup.has(c.gi) || usedWord.has(c.word)) continue;
+      usedGroup.add(c.gi); usedWord.add(c.word); picked.push(c);
     } };
     take(seen.slice(0, n - wantNew));
     take(fresh);
@@ -2096,11 +2289,18 @@ window.addEventListener('resize', () => { try { Calc.reflow(); } catch (e) {} })
 
 document.addEventListener('keydown', e => {
   if (!S || S.view !== 'q') return;
+  // Bluebook's own Highlights shortcut
+  if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'h') { e.preventDefault(); $('#hlbtn').click(); return; }
+  // Leave browser shortcuts alone: Cmd+C used to pick answer C, Ctrl+D answer D.
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // With the navigator or reference sheet open, keys would change the question underneath it.
+  const pop = $('.navpop');
+  if (pop) { if (e.key === 'Escape') pop.remove(); return; }
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') $('#next').click(); return; }
   const m = S.plan[S.stage], q = m.qs[S.idx];
   if (e.key === 'ArrowRight') $('#next').click();
   else if (e.key === 'ArrowLeft') { const b = $('#back'); if (!b.disabled) b.click(); }
-  else if (q.type === 'mcq' && /^[a-dA-D]$/.test(e.key)) {
+  else if (q.type === 'mcq' && /^[a-dA-D]$/.test(e.key) && !(S.tutor && S.checked[S.stage][S.idx])) {
     const i = 'abcd'.indexOf(e.key.toLowerCase());
     S.resp[S.stage][S.idx] = S.resp[S.stage][S.idx] === i ? null : i;
     render();
