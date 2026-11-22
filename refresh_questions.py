@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Pull the SAT Suite Educator Question Bank into a single questions.js blob."""
-import json, re, sys, urllib.request, urllib.error
+import json, os, re, sys, urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
 LIST_URL = 'https://qbank-api.collegeboard.org/msreportingquestionbank-prod/questionbank/digital/get-questions'
@@ -148,6 +148,8 @@ def main():
             len(qs), len(got) - len(qs), sum(q['live'] for q in qs)), flush=True)
         out[name] = qs
     write(dest, out)
+    # keep the shipped grid-in id list in step with the bank it came from
+    write_gridins(out, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gridins.js'))
 
 
 if __name__ == '__main__':

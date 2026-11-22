@@ -939,7 +939,9 @@ const Resume = {
     S = { plan, stage: d.stage, view: d.view, idx: d.idx,
           resp: d.resp, marks: d.marks, strikes: d.strikes,
           abc: d.abc, hideTimer: d.hideTimer, expired: d.expired,
-          endsAt: Date.now() + d.left, startedAt: d.startedAt || Date.now() };
+          endsAt: Date.now() + d.left,
+          // the clock paused while you were away, so Elapsed shouldn't count that gap
+          startedAt: (d.startedAt || d.at) + (Date.now() - d.at) };
 
     // Every stage with questions has to be hydrated, not just the current one:
     // finish() scores the whole plan, and the review list needs the content of
@@ -1634,7 +1636,8 @@ function finish() {
   S.view = 'results';
   const flat = [];
   S.plan.forEach((m, si) => m.qs.forEach((q, i) =>
-    flat.push({ q, resp: S.resp[si][i], ok: isCorrect(q, S.resp[si][i]), mod: m.label, sec: m.sec })));
+    flat.push({ q, resp: S.resp[si][i], ok: isCorrect(q, S.resp[si][i]), mod: m.label,
+               sec: q.dom in SPEC.math.doms ? 'math' : 'rw' })));   // mistake drills mix sections
   S.flat = flat;
   const correct = flat.filter(f => f.ok).length;
   const hist = LS.get('history', []);
