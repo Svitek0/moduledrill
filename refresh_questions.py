@@ -29,34 +29,16 @@ def post(url, payload, tries=4):
 
 
 # --- HTML cleanup -----------------------------------------------------------
-# <mfenced> was dropped from MathML Core; Chrome/Safari won't render it.
-# Rewrite it into explicit <mo> delimiters so the parens survive.
-MFENCED = re.compile(r'<mfenced([^>]*)>(.*?)</mfenced>', re.S | re.I)
-ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
-
-
-def fix_mfenced(html):
-    prev = None
-    while prev != html:  # nested mfenced needs repeated passes
-        prev = html
-        html = MFENCED.sub(_expand, html)
-    return html
-
-
-def _expand(m):
-    attrs = dict(ATTR.findall(m.group(1) or ''))
-    open_c = attrs.get('open', '(')
-    close_c = attrs.get('close', ')')
-    return '<mrow><mo>%s</mo>%s<mo>%s</mo></mrow>' % (open_c, m.group(2), close_c)
-
-
+# <mfenced> is left alone: the app rewrites it with a real DOM parser when it
+# loads a bundle (fixMathML in index.html), which handles nesting and
+# separators that a regex can't.
 ALTTEXT = re.compile(r'\s+alttext="[^"]*"')
 
 
 def clean(html):
     if not html:
         return ''
-    return ALTTEXT.sub('', fix_mfenced(html))
+    return ALTTEXT.sub('', html)
 
 
 # --- fetch ------------------------------------------------------------------
@@ -71,6 +53,9 @@ def fetch_one(meta):
         return None
     return {
         'id': meta['questionId'],
+        # the live app keys cache, resume and mistakes by external_id; without
+        # it a bundle falls back to questionId and none of those line up
+        'ext': meta['external_id'],
         'dom': meta['primary_class_cd'],
         'domName': meta['primary_class_cd_desc'],
         'skill': meta['skill_desc'],
@@ -92,10 +77,11 @@ def live_sets():
 
 
 def get_meta(name, params, live):
-    meta = [m for m in post(LIST_URL, {'asmtEventId': 99,
-                                       'test': params['test'],
-                                       'domain': params['domain']})
-            if m.get('external_id')]
+    rows = post(LIST_URL, {'asmtEventId': 99, 'test': params['test'],
+                           'domain': params['domain']})
+    if rows is None:
+        sys.exit('could not fetch the %s question list' % name)
+    meta = [m for m in rows if m.get('external_id')]
     for m in meta:
         m['_live'] = m['external_id'] in live[name]
     return meta
@@ -110,7 +96,7 @@ def write_gridins(out, path='gridins.js'):
     multiple choice, so only math needs a list.
     """
     ids = sorted(q['id'] for q in out['math'] if q['type'] == 'spr')
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write('window.GRIDINS=')
         json.dump(ids, f, separators=(',', ':'))
         f.write(';\n')
@@ -119,7 +105,7 @@ def write_gridins(out, path='gridins.js'):
 
 
 def write(dest, out):
-    with open(dest, 'w') as f:
+    with open(dest, 'w', encoding='utf-8') as f:
         f.write('window.QBANK=')
         json.dump(out, f, separators=(',', ':'), ensure_ascii=False)
         f.write(';\n')
@@ -129,7 +115,7 @@ def write(dest, out):
 
 def annotate(dest, live):
     """Refresh only the `live` flags on an existing questions.js — no bodies."""
-    src = open(dest).read()
+    src = open(dest, encoding='utf-8').read()
     out = json.loads(src[src.index('=') + 1:src.rstrip().rstrip(';').rindex('}') + 1])
     for name, params in SECTIONS.items():
         flag = {m['questionId']: m['_live'] for m in get_meta(name, params, live)}
@@ -142,6 +128,8 @@ def annotate(dest, live):
 
 
 def main():
+    if len(sys.argv) < 2:
+        sys.exit('usage: refresh_questions.py questions.js [--annotate]')
     dest = sys.argv[1]
     live = live_sets()
     print('active items: ' + ', '.join('%s %d' % (k, len(v)) for k, v in live.items()))
