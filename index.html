@@ -328,9 +328,11 @@
     .hleft{font-size:13px;min-width:0}
     .hleft small{display:none}
     .hright{gap:10px;min-width:0}
-    .tool{font-size:10px;padding:2px}
-    .tool span.ic{font-size:15px}
+    /* four math tools don't fit with labels; icons only (the text stays for screen readers) */
+    .tool{font-size:0;padding:4px}
+    .tool span.ic{font-size:18px}
     .timer{font-size:19px}
+    .timerwrap{min-width:0}
     .qhead .acts{gap:8px;padding:5px 8px}
     footer{padding:9px 12px;gap:8px}
     .navbtn{padding:8px 15px;font-size:13px}
