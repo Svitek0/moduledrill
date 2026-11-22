@@ -60,6 +60,10 @@ skill has enough retired questions to fill the drill.
 **Your mistakes** — questions you got wrong, collected so you can drill them again. Answer one
 correctly anywhere and it leaves the list.
 
+Custom and mistakes drills have an optional **check each answer as I go** mode: a Check button
+reveals whether you were right and College Board's explanation before you move on, and locks
+that answer. Full tests and modules always behave like test day.
+
 **Vocabulary** — a three-minute word drill, described below.
 
 Modules follow the real blueprint rather than drawing at random:
@@ -115,13 +119,28 @@ stored**, and the sentences the words came from are deliberately left out: showi
 - Math reference sheet, and College Board's own Desmos build in a draggable, resizable
   panel over the question — no tab switching. It loads only when you first open it, and
   remembers where you put it.
-- Keyboard: `A`–`D` to answer, `←`/`→` to move, `M` to mark
+- Highlighter, like Bluebook's Highlights & Notes: turn it on, select text in the passage or
+  question to highlight it, click a highlight to remove it. Highlights stay with the question
+  when you move around and when you resume. (No notes yet.)
+- Keyboard: `A`–`D` to answer, `←`/`→` to move, `M` to mark, `Ctrl+H` for the highlighter
 
 ## Results
 
 Raw score, accuracy, and breakdowns by domain, by skill, and by difficulty — then every
 question you missed with the official explanation. History is kept locally, and new sessions
 prefer questions you haven't seen.
+
+Time is tracked per question, so results also show pacing: the per-question budget your time
+limit works out to, how long your right and wrong answers took on average, average time per
+domain and skill, and which questions took more than twice the budget. One button drills that
+session's misses again.
+
+Once you have two sessions, the menu shows **progress by domain**: accuracy across every
+session next to your last five.
+
+Everything is stored in your browser only, so the menu can download a **progress backup**
+(history, mistakes, vocabulary progress, settings) and restore it, including on another
+device.
 
 **There is deliberately no 200–800 score.** The bank is a flat pool: not adaptive, not equated.
 Any scaled number derived from it would be invented, and an invented score is worse than no
@@ -136,7 +155,7 @@ score. Read the domain table instead.
   flag, not a guarantee about any specific Bluebook form.
 - 459 items are skipped because they embed their math as images rather than text. Those come
   from the disclosed paper tests, so leaving them out is a second layer of spoiler protection.
-- No annotation/highlighter tool.
+- The highlighter has no notes, and it skips text inside math expressions.
 - The embedded calculator is the one part that needs a connection, and it's a third-party
   frame, so Desmos sees the visitor's IP like any embed would.
 - If College Board changes or closes the API, the app breaks. See below.
